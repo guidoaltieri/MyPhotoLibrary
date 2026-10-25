@@ -154,7 +154,7 @@ private fun SyncCard(ic: ICloudManager) {
     val enabled by ic.autoCopy.collectAsState()
     val destId by ic.destination.collectAsState()
     val configured = load(destId, initial = destId > 0) { ic.configured }
-    val synced = load(running, status, initial = 0) { repo.lib.icloudSyncedCount() }
+    val synced = load(running, status, task?.done?.div(10), initial = 0) { repo.lib.icloudSyncedCount() }   // aggiornato man mano
     val ctx = LocalContext.current
     val work by remember { WorkManager.getInstance(ctx).getWorkInfosForUniqueWorkFlow(ICloudManager.WORK) }.collectAsState(emptyList())
     val workState = work.firstOrNull()?.let { w ->

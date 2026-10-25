@@ -54,13 +54,22 @@ import io.github.guidoaltieri.myphotolibrary.core.basename
 fun treeName(ctx: android.content.Context, uri: Uri): String {
     val name = io.github.guidoaltieri.myphotolibrary.data.Storage.displayName(ctx, uri) ?: treeIdName(uri)
     if (!isCodeName(name)) return name
+    val authority = uri.authority ?: return name
     return try {
         val pm = ctx.packageManager
-        pm.resolveContentProvider(uri.authority ?: "", 0)?.loadLabel(pm)?.toString()?.takeIf { it.isNotBlank() }
+        pm.resolveContentProvider(authority, 0)?.loadLabel(pm)?.toString()?.takeIf { it.isNotBlank() && !isCodeName(it) }
     } catch (e: Exception) {
         null
-    } ?: name
+    } ?: KNOWN_PROVIDERS.entries.firstOrNull { authority.startsWith(it.key) }?.value ?: name
 }
+
+/** App cloud note, se Android non dice il nome dell'app che fornisce la cartella. */
+private val KNOWN_PROVIDERS = mapOf(
+    "me.proton.android.drive" to "Proton Drive", "com.microsoft.skydrive" to "OneDrive", "com.nextcloud" to "Nextcloud",
+    "com.owncloud" to "ownCloud", "com.google.android.apps.docs" to "Google Drive", "com.dropbox" to "Dropbox",
+    "com.pcloud" to "pCloud", "mega." to "MEGA", "nz.mega" to "MEGA", "com.box" to "Box", "com.synology" to "Synology Drive",
+    "com.icedrive" to "Icedrive", "com.filen" to "Filen", "io.filen" to "Filen", "com.seafile" to "Seafile",
+)
 
 /** Un nome che è in realtà un codice (es. 01a0d02f-eb27-77fc-8ee0-f8ddbef797f9). */
 fun isCodeName(name: String): Boolean = name.length >= 16 && name.all { it.isDigit() || it in 'a'..'f' || it in 'A'..'F' || it == '-' }

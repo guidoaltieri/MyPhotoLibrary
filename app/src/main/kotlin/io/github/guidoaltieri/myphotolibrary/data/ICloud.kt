@@ -308,15 +308,20 @@ class ICloudManager(private val ctx: Context, private val repo: Repo) {
         setStatus("Fototeca iCloud: ${Fmt.thousands(total.toLong())} elementi. Copia verso ${src.name}…")
         val remote = object : ICloudSync.Remote {
             override fun page(offset: Int) = photos.page(offset)
-            override fun open(url: String) = photos.open(url)
+            override fun open(url: String): java.io.InputStream {
+                val t0 = System.currentTimeMillis()
+                return photos.open(url).also { val ms = System.currentTimeMillis() - t0; if (ms > 3000) log("Risposta di iCloud: ${ms / 1000} s") }
+            }
         }
-        val dest = Storage.TreeTarget(ctx, Uri.parse(src.path))
+        val dest = Storage.TreeTarget(ctx, Uri.parse(src.path), cancelled) { log(it) }
+        log("Destinazione: ${src.name} (${Uri.parse(src.path).authority})")
         val importId = repo.lib.newImport("iCloud Foto")
         var lastUpdate = 0L
-        val result = ICloudSync(repo.lib, src, remote, dest, layout, useExisting).run(!fullDone, importId, cancelled) { p ->
+        val result = ICloudSync(repo.lib, src, remote, dest, layout, useExisting) { log(it) }.run(!fullDone, importId, cancelled) { p ->
             val text = if (p.current.isEmpty()) "Controllate ${Fmt.thousands(p.checked.toLong())} di ${Fmt.thousands(total.toLong())}"
             else "Copiate ${p.copied} · ${p.current}"
-            repo.task.value = Task("iCloud Foto → ${src.name}", p.checked, total)
+            repo.task.value = Task(if (p.current.isEmpty()) "iCloud Foto → ${src.name}" else "Copia di ${p.current}", p.checked, total)
+            if (p.current.isNotEmpty() && p.copied + p.skipped + p.errors < 5) log("Copia di ${p.current}")
             if (System.currentTimeMillis() - lastUpdate > 1500) {
                 lastUpdate = System.currentTimeMillis()
                 repo.changed()                  // la galleria si aggiorna man mano

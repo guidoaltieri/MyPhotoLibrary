@@ -175,18 +175,33 @@ object Storage {
      * Cartella scelta con il selettore di sistema (anche di un'app cloud) come destinazione di
      * importazioni e copie da iCloud: elenca cartelle e file, crea le cartelle mancanti.
      */
-    class TreeTarget(private val ctx: Context, val tree: Uri) : ICloudSync.Destination {
+    class TreeTarget(private val ctx: Context, val tree: Uri, private val cancelled: () -> Boolean = { false },
+                     private val log: (String) -> Unit = {}) : ICloudSync.Destination {
         private val ids = HashMap<String, String>()   // cartella relativa → id del documento
+        // ogni cartella si legge una volta sola: con le app cloud un elenco può richiedere decine di secondi
+        private val listings = HashMap<String, List<Triple<String, String, Long>>>()
+
+        private inline fun <T> timed(what: String, block: () -> T): T {
+            val t0 = System.currentTimeMillis()
+            return block().also {
+                val ms = System.currentTimeMillis() - t0
+                if (ms > 3000) log("$what: ${ms / 1000} s")
+            }
+        }
 
         init {
             ids[""] = DocumentsContract.getTreeDocumentId(tree)
         }
 
-        private fun children(rel: String): List<Triple<String, String, Long>> {   // (nome, mime, dimensione)
+        private fun children(rel: String): List<Triple<String, String, Long>> = listings.getOrPut(rel) {   // (nome, mime, dimensione)
+            timed("Elenco di «${rel.ifEmpty { "/" }}»") { readChildren(rel) }
+        }
+
+        private fun readChildren(rel: String): List<Triple<String, String, Long>> {
             val id = ids[rel] ?: return emptyList()
             val out = mutableListOf<Triple<String, String, Long>>()
-            val q = queryChildren(ctx, DocumentsContract.buildChildDocumentsUriUsingTree(tree, id)) { false }
-            (q.cursor ?: throw IOException("Cartella non leggibile: ${q.error}")).use { c ->
+            val q = queryChildren(ctx, DocumentsContract.buildChildDocumentsUriUsingTree(tree, id), cancelled)
+            (q.cursor ?: throw ICloudSync.DestinationError("Cartella «${rel.ifEmpty { "/" }}» non leggibile: ${q.error}")).use { c ->
                 while (c.moveToNext()) {
                     val name = c.getString(1) ?: continue
                     val mime = c.getString(2) ?: ""
@@ -206,14 +221,18 @@ object Storage {
             val pid = dirId(parent)
             listDirs(parent)
             ids[rel]?.let { return it }
-            val doc = DocumentsContract.createDocument(ctx.contentResolver, DocumentsContract.buildDocumentUriUsingTree(tree, pid),
-                DocumentsContract.Document.MIME_TYPE_DIR, basename(rel)) ?: throw IOException("Impossibile creare la cartella $rel")
+            val doc = timed("Creazione della cartella «$rel»") {
+                DocumentsContract.createDocument(ctx.contentResolver, DocumentsContract.buildDocumentUriUsingTree(tree, pid),
+                    DocumentsContract.Document.MIME_TYPE_DIR, basename(rel))
+            } ?: throw ICloudSync.DestinationError("Impossibile creare la cartella «$rel»")
+            listings[rel] = emptyList()                  // appena creata: è vuota, non serve leggerla
             return DocumentsContract.getDocumentId(doc).also { ids[rel] = it }
         }
 
         /** Crea il file e lo riempie; l'URI è nella forma che usa la scansione della cartella. */
         override fun put(relFile: String, write: (OutputStream) -> Unit): ICloudSync.Written {
-            val doc = createInTree(ctx, tree, dirId(dirname(relFile)), basename(relFile), write)
+            val parent = dirId(dirname(relFile))
+            val doc = timed("Scrittura di «$relFile»") { createInTree(ctx, tree, parent, basename(relFile), write) }
             val uri = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getDocumentId(doc))
             var size = 0L
             var mtime = System.currentTimeMillis() / 1000.0

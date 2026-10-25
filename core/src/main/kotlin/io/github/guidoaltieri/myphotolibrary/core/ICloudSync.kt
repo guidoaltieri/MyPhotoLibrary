@@ -16,6 +16,7 @@ class ICloudSync(
     private val dest: Destination,
     layout: String,
     useExisting: Boolean,
+    private val log: (String) -> Unit = {},
 ) {
     /** L'elenco e gli originali di iCloud (ICloudPhotos, o uno finto nei test). */
     interface Remote {
@@ -30,6 +31,9 @@ class ICloudSync(
     }
 
     data class Written(val path: String, val size: Long, val mtime: Double)
+
+    /** La destinazione non si può leggere o scrivere: inutile provare con le foto successive. */
+    class DestinationError(message: String) : java.io.IOException(message)
     data class Progress(val checked: Int, val copied: Int, val skipped: Int, val errors: Int, val current: String)
     data class Result(val copied: Int, val skipped: Int, val errors: Int, val messages: List<String>, val complete: Boolean)
 
@@ -72,8 +76,12 @@ class ICloudSync(
                 progress(Progress(checked, copied, skipped, errors, a.filename))
                 try {
                     if (copyAsset(a, token, importId)) copied++ else skipped++
+                } catch (e: DestinationError) {
+                    lib.pairLivePhotos(source.id)
+                    throw e
                 } catch (e: Exception) {
                     errors++
+                    log("Errore con ${a.filename}: ${e.message ?: e.javaClass.simpleName}")
                     if (messages.size < 20) messages += "${a.filename}: ${(e.message ?: e.javaClass.simpleName).take(200)}"
                 }
             }
