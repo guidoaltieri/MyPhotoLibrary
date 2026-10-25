@@ -35,7 +35,6 @@ data class Item(
 ) {
     val isVideo get() = kind == "video"
     val isLive get() = liveVideo != null || "live" in flags
-    fun hasFlag(f: String) = flags.split(",").contains(f)
 }
 
 /** Tutti i dati di un elemento (scheda Informazioni). */
@@ -114,6 +113,10 @@ class Library(val db: Db) {
             "edited" to View("Modificate", "edit", "$BASE AND edits IS NOT NULL", "taken"),
             "geotagged" to View("Con posizione", "places", "$BASE AND lat IS NOT NULL", "taken"),
         )
+        /** query di ricerca equivalente a ogni tipo di media */
+        val MEDIA_TYPE_QUERY = mapOf("videos" to "is:video", "selfies" to "is:selfie", "live" to "is:live", "portrait" to "is:portrait",
+            "panorama" to "is:panorama", "slomo" to "is:slomo", "burst" to "is:burst", "animated" to "is:animated",
+            "screenshots" to "is:screenshot", "screenrec" to "is:screenrec", "raw" to "is:raw")
         val MEDIA_TYPES = listOf("videos", "selfies", "live", "portrait", "panorama", "slomo", "burst", "animated",
             "screenshots", "screenrec", "raw")
 
@@ -159,7 +162,8 @@ class Library(val db: Db) {
             fold(name), fold(relpath), fold(caption), fold(title), fold(keywords), fold(place),
             fold(listOf(make.orEmpty(), model.orEmpty()).joinToString(" ").trim()), fold(lens), fold(software))
 
-        const val FOLDED_SET = "f_name=?, f_path=?, f_caption=?, f_title=?, f_keywords=?, f_place=?, f_camera=?, f_lens=?, f_software=?"
+        val FOLDED_COLUMNS = listOf("f_name", "f_path", "f_caption", "f_title", "f_keywords", "f_place", "f_camera", "f_lens", "f_software")
+        val FOLDED_SET = FOLDED_COLUMNS.joinToString(", ") { "$it=?" }
     }
 
     init {
@@ -226,9 +230,9 @@ class Library(val db: Db) {
             }
             view.startsWith("ids:") -> {
                 val ids = view.substring(4).split(",").filter { it.isNotEmpty() }.map { it.toLong() }
-                val (q, p) = inClause(ids)
+                val q = idList(ids)
                 clauses += "deleted IS NULL AND paired = 0"; clauses += "id IN $q"
-                params.addAll(p); order = "taken"
+                order = "taken"
             }
             else -> {
                 val v = VIEWS[view] ?: VIEWS.getValue("library")
@@ -268,6 +272,20 @@ class Library(val db: Db) {
 
     fun item(id: Long): Item? = db.one("SELECT $LIST_COLUMNS FROM media WHERE id=?", listOf(id))?.let(::toItem)
 
+    /** Più elementi in una sola lettura, nell'ordine degli id (eliminati e nascosti compresi). */
+    fun items(ids: Collection<Long>): List<Item> {
+        val byId = ids.chunked(5000).flatMap { db.query("SELECT $LIST_COLUMNS FROM media WHERE id IN ${idList(it)}").map(::toItem) }
+            .associateBy { it.id }
+        return ids.mapNotNull { byId[it] }
+    }
+
+    /** Anni presenti nella libreria, dal più recente. */
+    fun years(): List<String> {
+        val v = viewSql("library")
+        return db.query("SELECT DISTINCT strftime('%Y', taken, 'unixepoch', 'localtime') y FROM media${v.where} ORDER BY y DESC", v.params)
+            .mapNotNull { it.str("y") }
+    }
+
     fun itemByPath(path: String): Item? = db.one("SELECT $LIST_COLUMNS FROM media WHERE path=?", listOf(path))?.let(::toItem)
 
     fun detail(id: Long): ItemDetail? {
@@ -304,31 +322,31 @@ class Library(val db: Db) {
 
     // --- azioni sugli elementi ------------------------------------------------------------
     fun setFavorite(ids: Collection<Long>, on: Boolean) {
-        val (q, p) = inClause(ids)
-        db.exec("UPDATE media SET favorite=? WHERE id IN $q", listOf<Any?>(if (on) 1 else 0) + p)
+        val q = idList(ids)
+        db.exec("UPDATE media SET favorite=? WHERE id IN $q", listOf<Any?>(if (on) 1 else 0))
     }
 
     fun toggleFavorite(ids: Collection<Long>): Boolean {
-        val (q, p) = inClause(ids)
-        val on = !db.query("SELECT favorite FROM media WHERE id IN $q", p).all { it.bool("favorite") }
+        val q = idList(ids)
+        val on = !db.query("SELECT favorite FROM media WHERE id IN $q").all { it.bool("favorite") }
         setFavorite(ids, on)
         return on
     }
 
     fun setHidden(ids: Collection<Long>, on: Boolean) {
-        val (q, p) = inClause(ids)
-        db.exec("UPDATE media SET hidden=? WHERE id IN $q", listOf<Any?>(if (on) 1 else 0) + p)
+        val q = idList(ids)
+        db.exec("UPDATE media SET hidden=? WHERE id IN $q", listOf<Any?>(if (on) 1 else 0))
     }
 
     /** Sposta in «Eliminati di recente» (i file non vengono toccati). */
     fun delete(ids: Collection<Long>) {
-        val (q, p) = inClause(ids)
-        db.exec("UPDATE media SET deleted=? WHERE id IN $q", listOf<Any?>(now()) + p)
+        val q = idList(ids)
+        db.exec("UPDATE media SET deleted=? WHERE id IN $q", listOf<Any?>(now()))
     }
 
     fun restore(ids: Collection<Long>) {
-        val (q, p) = inClause(ids)
-        db.exec("UPDATE media SET deleted=NULL WHERE id IN $q", p)
+        val q = idList(ids)
+        db.exec("UPDATE media SET deleted=NULL WHERE id IN $q")
     }
 
     data class Purged(val id: Long, val path: String, val liveVideo: String?, val sourceKind: String)
@@ -339,37 +357,37 @@ class Library(val db: Db) {
      */
     fun purge(ids: Collection<Long>): List<Purged> {
         if (ids.isEmpty()) return emptyList()
-        val (q, p) = inClause(ids)
-        val rows = db.query("SELECT m.id, m.path, m.live_video, s.kind AS source_kind FROM media m JOIN sources s ON s.id = m.source_id WHERE m.id IN $q", p)
+        val q = idList(ids)
+        val rows = db.query("SELECT m.id, m.path, m.live_video, s.kind AS source_kind FROM media m JOIN sources s ON s.id = m.source_id WHERE m.id IN $q")
             .map { Purged(it.long("id")!!, it.str("path")!!, it.str("live_video"), it.str("source_kind") ?: "") }
         db.transaction {
-            db.exec("UPDATE media SET paired = 2 WHERE id IN $q", p)
-            db.exec("DELETE FROM album_items WHERE media_id IN $q", p)
-            db.exec("DELETE FROM faces WHERE media_id IN $q", p)
+            db.exec("UPDATE media SET paired = 2 WHERE id IN $q")
+            db.exec("DELETE FROM album_items WHERE media_id IN $q")
+            db.exec("DELETE FROM faces WHERE media_id IN $q")
         }
         return rows
     }
 
     /** Il file è stato eliminato davvero: la riga può sparire. */
     fun forget(ids: Collection<Long>) {
-        val (q, p) = inClause(ids)
-        db.exec("DELETE FROM media WHERE id IN $q", p)
+        val q = idList(ids)
+        db.exec("DELETE FROM media WHERE id IN $q")
     }
 
     fun expiredDeleted(days: Int = DELETED_KEEP_DAYS): List<Long> =
         db.query("SELECT id FROM media WHERE deleted IS NOT NULL AND deleted < ? AND paired = 0", listOf(now() - days * 86400.0)).map { it.long("id")!! }
 
     private fun userMark(ids: Collection<Long>, vararg cols: String) {
-        val (q, p) = inClause(ids)
-        for (c in cols) db.exec("UPDATE media SET user = user || ? || ',' WHERE id IN $q AND instr(user, ?) = 0", listOf<Any?>(c) + p + listOf(",$c,"))
+        val q = idList(ids)
+        for (c in cols) db.exec("UPDATE media SET user = user || ? || ',' WHERE id IN $q AND instr(user, ?) = 0", listOf<Any?>(c) + listOf(",$c,"))
     }
 
     /** Ricalcola le colonne normalizzate per la ricerca. */
     fun refold(ids: Collection<Long>) {
         if (ids.isEmpty()) return
         for (chunk in ids.chunked(500)) {
-            val (q, p) = inClause(chunk)
-            for (r in db.query("SELECT id, name, relpath, caption, title, keywords, place, make, model, lens, software FROM media WHERE id IN $q", p)) {
+            val q = idList(chunk)
+            for (r in db.query("SELECT id, name, relpath, caption, title, keywords, place, make, model, lens, software FROM media WHERE id IN $q")) {
                 db.exec("UPDATE media SET $FOLDED_SET WHERE id=?", folded(r.str("name"), r.str("relpath"), r.str("caption"),
                     r.str("title"), r.str("keywords"), r.str("place"), r.str("make"), r.str("model"), r.str("lens"), r.str("software")) + listOf(r.long("id")))
             }
@@ -380,17 +398,9 @@ class Library(val db: Db) {
         db.exec("UPDATE media SET caption=? WHERE id=?", listOf(caption, id)); userMark(listOf(id), "caption"); refold(listOf(id))
     }
 
-    fun setTitle(id: Long, title: String) = db.transaction {
-        db.exec("UPDATE media SET title=? WHERE id=?", listOf(title, id)); userMark(listOf(id), "title"); refold(listOf(id))
-    }
-
-    fun setRating(id: Long, rating: Int) = db.transaction {
-        db.exec("UPDATE media SET rating=? WHERE id=?", listOf(rating, id)); userMark(listOf(id), "rating")
-    }
-
     fun setKeywords(ids: Collection<Long>, keywords: List<String>) = db.transaction {
-        val (q, p) = inClause(ids)
-        db.exec("UPDATE media SET keywords=? WHERE id IN $q", listOf<Any?>(keywordsJson(keywords)) + p)
+        val q = idList(ids)
+        db.exec("UPDATE media SET keywords=? WHERE id IN $q", listOf<Any?>(keywordsJson(keywords)))
         userMark(ids, "keywords"); refold(ids)
     }
 
@@ -402,9 +412,9 @@ class Library(val db: Db) {
 
     /** Modifica data e ora: valore assoluto o spostamento (in secondi) di tutte le foto. */
     fun setTaken(ids: Collection<Long>, ts: Double? = null, shift: Double? = null) = db.transaction {
-        val (q, p) = inClause(ids)
-        if (shift != null) db.exec("UPDATE media SET taken = taken + ?, taken_guess = 0 WHERE id IN $q", listOf<Any?>(shift) + p)
-        else db.exec("UPDATE media SET taken = ?, taken_guess = 0 WHERE id IN $q", listOf<Any?>(ts) + p)
+        val q = idList(ids)
+        if (shift != null) db.exec("UPDATE media SET taken = taken + ?, taken_guess = 0 WHERE id IN $q", listOf<Any?>(shift))
+        else db.exec("UPDATE media SET taken = ?, taken_guess = 0 WHERE id IN $q", listOf<Any?>(ts))
         userMark(ids, "taken", "taken_guess")
     }
 
@@ -415,8 +425,8 @@ class Library(val db: Db) {
     }
 
     fun ignoreSuggestions(ids: Collection<Long>, on: Boolean = true) {
-        val (q, p) = inClause(ids)
-        db.exec("UPDATE media SET suggest_ignored = ? WHERE id IN $q", listOf<Any?>(if (on) 1 else 0) + p)
+        val q = idList(ids)
+        db.exec("UPDATE media SET suggest_ignored = ? WHERE id IN $q", listOf<Any?>(if (on) 1 else 0))
     }
 
     data class Located(val id: Long, val lat: Double, val lon: Double, val place: String?)
@@ -430,13 +440,13 @@ class Library(val db: Db) {
     }
 
     fun ignorePlaceSuggestions(ids: Collection<Long>, on: Boolean = true) {
-        val (q, p) = inClause(ids)
-        db.exec("UPDATE media SET place_suggest_ignored = ? WHERE id IN $q", listOf<Any?>(if (on) 1 else 0) + p)
+        val q = idList(ids)
+        db.exec("UPDATE media SET place_suggest_ignored = ? WHERE id IN $q", listOf<Any?>(if (on) 1 else 0))
     }
 
     fun setLocation(ids: Collection<Long>, lat: Double?, lon: Double?, place: String? = null) = db.transaction {
-        val (q, p) = inClause(ids)
-        db.exec("UPDATE media SET lat=?, lon=?, alt=NULL, place=? WHERE id IN $q", listOf<Any?>(lat, lon, place) + p)
+        val q = idList(ids)
+        db.exec("UPDATE media SET lat=?, lon=?, alt=NULL, place=? WHERE id IN $q", listOf<Any?>(lat, lon, place))
         userMark(ids, "lat", "lon", "alt"); refold(ids)
     }
 
@@ -498,22 +508,14 @@ class Library(val db: Db) {
         val top = (db.one("SELECT COALESCE(MAX(pos), 0) m FROM album_items WHERE album_id=?", listOf(id))?.double("m") ?: 0.0)
         var n = 0
         ids.forEachIndexed { i, mid ->
-            val exists = db.one("SELECT 1 x FROM album_items WHERE album_id=? AND media_id=?", listOf(id, mid)) != null
-            if (!exists) {
-                db.exec("INSERT INTO album_items(album_id, media_id, pos) VALUES (?,?,?)", listOf(id, mid, top + i + 1))
-                n++
-            }
+            n += db.update("INSERT OR IGNORE INTO album_items(album_id, media_id, pos) VALUES (?,?,?)", listOf(id, mid, top + i + 1))
         }
         n
     }
 
     fun removeFromAlbum(id: Long, ids: Collection<Long>) {
-        val (q, p) = inClause(ids)
-        db.exec("DELETE FROM album_items WHERE album_id=? AND media_id IN $q", listOf<Any?>(id) + p)
-    }
-
-    fun reorderAlbum(id: Long, ordered: List<Long>) = db.transaction {
-        ordered.forEachIndexed { i, mid -> db.exec("UPDATE album_items SET pos=? WHERE album_id=? AND media_id=?", listOf(i, id, mid)) }
+        val q = idList(ids)
+        db.exec("DELETE FROM album_items WHERE album_id=? AND media_id IN $q", listOf<Any?>(id))
     }
 
     fun setAlbumCover(id: Long, mid: Long) = db.exec("UPDATE albums SET cover_id=? WHERE id=?", listOf(mid, id))
@@ -576,8 +578,8 @@ class Library(val db: Db) {
      * eliminati e ne riporta preferito, album e parole chiave sulla versione tenuta.
      */
     fun mergeDuplicates(groupIds: List<Long>): Int {
-        val (q, p) = inClause(groupIds)
-        val rows = db.query("SELECT * FROM media WHERE id IN $q", p)
+        val q = idList(groupIds)
+        val rows = db.query("SELECT * FROM media WHERE id IN $q")
         if (rows.size < 2) return 0
         val sorted = rows.sortedWith(compareBy({ -(it.long("width") ?: 0) * (it.long("height") ?: 0) }, { -(it.long("filesize") ?: 0) }))
         val keep = sorted[0]
@@ -585,8 +587,8 @@ class Library(val db: Db) {
         val others = sorted.drop(1)
         val oid = others.map { it.long("id")!! }
         if (others.any { it.bool("favorite") }) setFavorite(listOf(keepId), true)
-        val (oq, op) = inClause(oid)
-        for (a in db.query("SELECT DISTINCT album_id FROM album_items WHERE media_id IN $oq", op)) addToAlbum(a.long("album_id")!!, listOf(keepId))
+        val oq = idList(oid)
+        for (a in db.query("SELECT DISTINCT album_id FROM album_items WHERE media_id IN $oq")) addToAlbum(a.long("album_id")!!, listOf(keepId))
         val kws = parseKeywords(keep.str("keywords")).toMutableSet()
         others.forEach { kws += parseKeywords(it.str("keywords")) }
         if (kws.isNotEmpty()) setKeywords(listOf(keepId), kws.toList())
@@ -651,14 +653,13 @@ class Library(val db: Db) {
     }
 
     fun mergePersons(into: Long, others: List<Long>) = db.transaction {
-        val (q, p) = inClause(others)
-        db.exec("UPDATE faces SET person_id=? WHERE person_id IN $q", listOf<Any?>(into) + p)
-        db.exec("DELETE FROM persons WHERE id IN $q", p)
+        val q = idList(others)
+        db.exec("UPDATE faces SET person_id=? WHERE person_id IN $q", listOf<Any?>(into))
+        db.exec("DELETE FROM persons WHERE id IN $q")
     }
 
     fun setPersonFavorite(id: Long, on: Boolean) = db.exec("UPDATE persons SET favorite=? WHERE id=?", listOf(if (on) 1 else 0, id))
     fun hidePerson(id: Long) = db.exec("UPDATE persons SET hidden=1 WHERE id=?", listOf(id))
-    fun setPersonCover(id: Long, faceId: Long) = db.exec("UPDATE persons SET cover_face=? WHERE id=?", listOf(faceId, id))
 
     fun facesOf(mid: Long): List<Face> = db.query("SELECT f.id, f.media_id, f.x, f.y, f.w, f.h, f.person_id, COALESCE(p.name, '') AS name " +
             "FROM faces f LEFT JOIN persons p ON p.id = f.person_id WHERE f.media_id = ?", listOf(mid)).map(::toFace)
@@ -672,8 +673,8 @@ class Library(val db: Db) {
     }
 
     fun removeFromPerson(pid: Long, mediaIds: Collection<Long>) {
-        val (q, p) = inClause(mediaIds)
-        db.exec("UPDATE faces SET person_id=NULL, manual=1 WHERE person_id=? AND media_id IN $q", listOf<Any?>(pid) + p)
+        val q = idList(mediaIds)
+        db.exec("UPDATE faces SET person_id=NULL, manual=1 WHERE person_id=? AND media_id IN $q", listOf<Any?>(pid))
     }
 
     fun personNames(): List<String> = db.query("SELECT DISTINCT name FROM persons WHERE name != '' ORDER BY fname").map { it.str("name")!! }
@@ -713,13 +714,13 @@ class Library(val db: Db) {
             "exif" to exifJson(m.exif),
         )
         val ext = extension(name)
-        val existing = db.one("SELECT id, user FROM media WHERE path=?", listOf(path))
+        val keywords = values["keywords"] as String
+        val existing = db.one("SELECT id, user, place FROM media WHERE path=?", listOf(path))
         return if (existing == null) {
-            val cols = listOf("source_id", "path", "name", "relpath", "ext") + MEDIA_COLUMNS + listOf("added", "import_id", "scan_seen")
-            val args = listOf<Any?>(sourceId, path, name, relpath, ext) + MEDIA_COLUMNS.map { values[it] } + listOf(now(), importId, token)
-            val id = db.insert("INSERT INTO media(${cols.joinToString(", ")}) VALUES (${cols.joinToString(",") { "?" }})", args)
-            refold(listOf(id))
-            id
+            val cols = listOf("source_id", "path", "name", "relpath", "ext") + MEDIA_COLUMNS + listOf("added", "import_id", "scan_seen") + FOLDED_COLUMNS
+            val args = listOf<Any?>(sourceId, path, name, relpath, ext) + MEDIA_COLUMNS.map { values[it] } + listOf(now(), importId, token) +
+                folded(name, relpath, m.caption, m.title, keywords, null, m.make, m.model, m.lens, m.software)
+            db.insert("INSERT INTO media(${cols.joinToString(", ")}) VALUES (${cols.joinToString(",") { "?" }})", args)
         } else {
             val id = existing.long("id")!!
             val user = existing.str("user") ?: ","
@@ -729,8 +730,14 @@ class Library(val db: Db) {
                 if (c in USER_COLUMNS && ",$c," in user) continue
                 sets += "$c=?"; args += values[c]
             }
+            // testi modificati dall'utente: le colonne di ricerca si ricalcolano dai valori salvati
+            val userText = listOf("caption", "title", "keywords").any { ",$it," in user }
+            if (!userText) {
+                sets += FOLDED_SET
+                args.addAll(folded(name, relpath, m.caption, m.title, keywords, existing.str("place"), m.make, m.model, m.lens, m.software))
+            }
             db.exec("UPDATE media SET ${sets.joinToString(", ")} WHERE id=?", args + id)
-            refold(listOf(id))
+            if (userText) refold(listOf(id))
             id
         }
     }
@@ -738,10 +745,6 @@ class Library(val db: Db) {
     fun markSeen(paths: Collection<String>, token: String) = db.transaction {
         for (p in paths) db.exec("UPDATE media SET scan_seen=? WHERE path=?", listOf(token, p))
     }
-
-    /** Aggiorna solo i dati che cambiano senza rileggere il file (es. nome o percorso spostato). */
-    fun updateLocationInSource(path: String, name: String, relpath: String) =
-        db.exec("UPDATE media SET name=?, relpath=?, f_name=?, f_path=? WHERE path=?", listOf(name, relpath, fold(name), fold(relpath), path))
 
     /**
      * Scansione completa: rimuove i file spariti, con le stesse protezioni di ArchPhotos

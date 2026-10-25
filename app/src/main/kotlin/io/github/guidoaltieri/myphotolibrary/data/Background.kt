@@ -123,7 +123,7 @@ class FaceAnalyzer(private val ctx: Context, private val lib: Library) {
             val bgr = Mat()
             val faces = Mat()
             try {
-                val soft = if (bmp.config == Bitmap.Config.ARGB_8888) bmp else bmp.copy(Bitmap.Config.ARGB_8888, false)
+                val soft = Images.argb(bmp)
                 Utils.bitmapToMat(soft, rgba)
                 Imgproc.cvtColor(rgba, bgr, Imgproc.COLOR_RGBA2BGR)
                 val w = bgr.cols().toDouble(); val h = bgr.rows().toDouble()

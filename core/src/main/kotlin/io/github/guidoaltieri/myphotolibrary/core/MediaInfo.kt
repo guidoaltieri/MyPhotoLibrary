@@ -25,9 +25,6 @@ object MediaInfo {
         "3gp" to "video/3gpp", "mts" to "video/mp2t", "m2ts" to "video/mp2t", "wmv" to "video/x-ms-wmv",
         "mpg" to "video/mpeg", "mpeg" to "video/mpeg", "ogv" to "video/ogg", "dng" to "image/x-adobe-dng")
 
-    /** flag (colonna "flags" del database, separati da virgole) */
-    val FLAGS = listOf("live", "selfie", "panorama", "portrait", "screenshot", "raw", "animated", "slomo", "burst", "screenrec")
-
     fun isMedia(name: String) = extension(name) in MEDIA_EXT
     fun isVideo(name: String) = extension(name) in VIDEO_EXT
     fun isRaw(name: String) = extension(name) in RAW_EXT
@@ -62,6 +59,11 @@ object MediaInfo {
         return Fmt.ts(t)
     }
 
+    /**
+     * Data EXIF/XMP/QuickTime → timestamp. Senza [offset] conta l'ora «sull'orologio» del momento
+     * dello scatto, ignorando un eventuale fuso scritto nel valore: così si ordinano insieme foto con
+     * fuso (iPhone) e senza (fotocamere) e la data mostrata è quella vista da chi ha scattato.
+     */
     fun parseExifDate(value: String?, offset: String? = null): Double? {
         if (value.isNullOrBlank()) return null
         val m = EXIF_DATE.find(value) ?: return null
@@ -96,6 +98,19 @@ object MediaInfo {
         }
         return parseExifDate(v)?.takeIf { it > 86400 * 365 }
     }
+
+    /** Date di scatto nell'XMP, nell'ordine in cui si usano. */
+    val XMP_DATES = listOf("exif:DateTimeOriginal", "photoshop:DateCreated", "xmp:CreateDate")
+
+    /**
+     * Data di scatto di una foto, nell'ordine: EXIF DateTimeOriginal, CreateDate (digitalizzazione),
+     * le stesse date in XMP, data GPS (in UTC, [gpsUtc]). La data di modifica NON è la data di
+     * scatto: si usa solo come stima in [MediaMeta.finish], dopo il nome del file.
+     */
+    fun imageDate(original: String?, digitized: String?, xmp: String, gpsUtc: Double?): Double? =
+        parseExifDate(original) ?: parseExifDate(digitized)
+            ?: XMP_DATES.firstNotNullOfOrNull { tag -> xmpValues(xmp, tag).firstOrNull()?.let { parseExifDate(it) } }
+            ?: gpsUtc
 
     // --- XMP ------------------------------------------------------------------------------
     /** Valori di un campo XMP (rdf:Bag/Seq/Alt o attributo). */
@@ -228,15 +243,20 @@ data class MediaMeta(
     var rating: Int = 0,
     var motionOffset: Long? = null,
     var exif: Map<String, String> = emptyMap(),
+    /** data di modifica EXIF: solo una stima della data di scatto */
+    var modifyDate: Double? = null,
 ) {
-    /** Data assente: dal nome del file, poi la data di modifica (come in ArchPhotos). */
+    /**
+     * Data assente: stime, nell'ordine, data nel nome del file, data di modifica EXIF, data del
+     * file (sulle cartelle cloud spesso è quella di caricamento).
+     */
     fun finish(name: String, size: Long, mtime: Double) {
         filesize = size
         this.mtime = mtime
         if (mime == null) mime = MediaInfo.mimeType(name)
         if (MediaInfo.isRaw(name)) flags += "raw"
         if (taken == null || taken == 0.0) {
-            taken = MediaInfo.dateFromName(name) ?: mtime
+            taken = MediaInfo.dateFromName(name) ?: modifyDate ?: mtime
             takenGuess = true
         }
         if (!MediaInfo.validCoords(lat, lon)) {

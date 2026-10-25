@@ -26,8 +26,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -44,7 +42,7 @@ import io.github.guidoaltieri.myphotolibrary.core.Fmt
 
 /** Schermata principale con le quattro sezioni: Libreria, Per te, Raccolte, Cerca. */
 @Composable
-fun HomeScreen(snackbar: SnackbarHostState, hasPermission: Boolean, onRequestPermission: () -> Unit) {
+fun HomeScreen(hasPermission: Boolean, onRequestPermission: () -> Unit) {
     val repo = repo()
     val nav = nav()
     var tab by rememberSaveable { mutableStateOf(0) }
@@ -56,7 +54,6 @@ fun HomeScreen(snackbar: SnackbarHostState, hasPermission: Boolean, onRequestPer
     val expired = load(initial = emptyList<Long>()) { repo.expired() }
     LaunchedEffect(tab) { sel.clear() }
     Scaffold(
-        snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             if (sel.active) SelectionTopBar(sel, emptyList())
             else Bar(listOf("Libreria", "Per te", "Raccolte", "Cerca")[tab],
@@ -124,10 +121,10 @@ fun HomeScreen(snackbar: SnackbarHostState, hasPermission: Boolean, onRequestPer
 
 /** Contenuto della pila di navigazione. */
 @Composable
-fun AppContent(snackbar: SnackbarHostState, hasPermission: Boolean, onRequestPermission: () -> Unit) {
+fun AppContent(hasPermission: Boolean, onRequestPermission: () -> Unit) {
     val nav = nav()
     when (val s = nav.top) {
-        Screen.Home -> HomeScreen(snackbar, hasPermission, onRequestPermission)
+        Screen.Home -> HomeScreen(hasPermission, onRequestPermission)
         is Screen.Grid -> GridScreen(s.view, s.title, s.query)
         is Screen.Ids -> IdsScreen(s.ids, s.title, s.subtitle)
         is Screen.Viewer -> ViewerScreen(s.ids, s.index, s.view)

@@ -3,7 +3,6 @@ package io.github.guidoaltieri.myphotolibrary.data
 import android.content.ContentUris
 import android.content.Context
 import android.net.Uri
-import android.provider.DocumentsContract
 import android.provider.MediaStore
 import io.github.guidoaltieri.myphotolibrary.core.Library
 import io.github.guidoaltieri.myphotolibrary.core.MediaInfo
@@ -41,7 +40,7 @@ class Scanner(private val ctx: Context, private val lib: Library, private val re
             val entries = try {
                 when (src.kind) {
                     "device" -> listMediaStore()
-                    else -> listTree(Uri.parse(src.path))
+                    else -> Storage.walkTree(ctx, Uri.parse(src.path))?.map { Entry(it.uri, it.name, it.relpath, it.size, it.mtime, null) }
                 }
             } catch (e: Exception) {
                 messages += "Sorgente non raggiungibile: ${src.name} (${e.message ?: e.javaClass.simpleName})"
@@ -118,39 +117,5 @@ class Scanner(private val ctx: Context, private val lib: Library, private val re
             }
         }
         return out
-    }
-
-    /** File multimediali in una cartella scelta con il selettore di sistema (ricorsivo). */
-    private fun listTree(tree: Uri): List<Entry>? {
-        val rootId = try { DocumentsContract.getTreeDocumentId(tree) } catch (e: Exception) { return null }
-        val out = ArrayList<Entry>()
-        val queue = ArrayDeque(listOf(rootId to ""))
-        val proj = arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME,
-            DocumentsContract.Document.COLUMN_MIME_TYPE, DocumentsContract.Document.COLUMN_SIZE, DocumentsContract.Document.COLUMN_LAST_MODIFIED)
-        var readable = false
-        while (queue.isNotEmpty()) {
-            val (docId, rel) = queue.removeFirst()
-            val children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, docId)
-            val c = try { ctx.contentResolver.query(children, proj, null, null, null) } catch (e: Exception) { null } ?: continue
-            readable = true
-            c.use {
-                while (it.moveToNext()) {
-                    val id = it.getString(0) ?: continue
-                    val name = it.getString(1) ?: continue
-                    val mime = it.getString(2) ?: ""
-                    if (name.startsWith(".") || name.startsWith("@") || name.startsWith("#")) continue
-                    val childRel = if (rel.isEmpty()) name else "$rel/$name"
-                    if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
-                        if (name !in setOf("\$RECYCLE.BIN", "System Volume Information", "lost+found")) queue.addLast(id to childRel)
-                        continue
-                    }
-                    if (!MediaInfo.isMedia(name)) continue
-                    val uri = DocumentsContract.buildDocumentUriUsingTree(tree, id)
-                    val mtime = if (it.isNull(4)) 0.0 else it.getLong(4) / 1000.0
-                    out += Entry(uri, name, childRel, if (it.isNull(3)) 0L else it.getLong(3), mtime, null)
-                }
-            }
-        }
-        return if (readable) out else null
     }
 }

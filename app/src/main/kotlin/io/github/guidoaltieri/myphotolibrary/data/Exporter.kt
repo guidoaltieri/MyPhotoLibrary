@@ -2,14 +2,12 @@ package io.github.guidoaltieri.myphotolibrary.data
 
 import android.content.ClipData
 import android.content.ClipboardManager
-import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Environment
 import android.provider.DocumentsContract
-import android.provider.MediaStore
 import androidx.core.content.FileProvider
 import androidx.exifinterface.media.ExifInterface
 import androidx.media3.common.MediaItem
@@ -145,30 +143,13 @@ class Exporter(private val ctx: Context) {
     }
 
     /** Salva un file esportato in Immagini/MyPhotoLibrary (o Film per i video). Restituisce l'URI. */
-    fun saveToDevice(file: File, subdir: String = "MyPhotoLibrary"): Uri {
-        val video = MediaInfo.isVideo(file.name)
-        val cv = ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, file.name)
-            put(MediaStore.MediaColumns.MIME_TYPE, MediaInfo.mimeType(file.name))
-            put(MediaStore.MediaColumns.RELATIVE_PATH, "${if (video) Environment.DIRECTORY_MOVIES else Environment.DIRECTORY_PICTURES}/$subdir")
-            put(MediaStore.MediaColumns.IS_PENDING, 1)
-        }
-        val coll = if (video) MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-        else MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-        val uri = ctx.contentResolver.insert(coll, cv) ?: throw java.io.IOException("Impossibile salvare ${file.name}")
-        ctx.contentResolver.openOutputStream(uri)?.use { out -> file.inputStream().use { it.copyTo(out, 1 shl 16) } }
-        ctx.contentResolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
-        return uri
-    }
+    fun saveToDevice(file: File, subdir: String = "MyPhotoLibrary"): Uri =
+        Storage.insertMedia(ctx, file.name, "${if (MediaInfo.isVideo(file.name)) Environment.DIRECTORY_MOVIES else Environment.DIRECTORY_PICTURES}/$subdir",
+            Storage.copyFrom(ctx, Uri.fromFile(file)))
 
     /** Salva in una cartella scelta dall'utente (selettore di sistema: memoria, SD, app cloud). */
-    fun saveToTree(file: File, tree: Uri): Uri {
-        val parent = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
-        val doc = DocumentsContract.createDocument(ctx.contentResolver, parent, MediaInfo.mimeType(file.name), file.name)
-            ?: throw java.io.IOException("Impossibile creare ${file.name}")
-        ctx.contentResolver.openOutputStream(doc)?.use { out -> file.inputStream().use { it.copyTo(out, 1 shl 16) } }
-        return doc
-    }
+    fun saveToTree(file: File, tree: Uri): Uri =
+        Storage.createInTree(ctx, tree, DocumentsContract.getTreeDocumentId(tree), file.name, Storage.copyFrom(ctx, Uri.fromFile(file)))
 
     /** URI condivisibile: l'originale se non ci sono modifiche, altrimenti la versione modificata. */
     suspend fun shareUri(item: Item): Uri = if (item.edits.isNullOrEmpty()) Uri.parse(item.path)

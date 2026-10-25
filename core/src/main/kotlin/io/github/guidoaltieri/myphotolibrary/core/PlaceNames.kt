@@ -92,6 +92,17 @@ object PlaceNames {
         }
     }
 
+    @Volatile private var sortedKeys: Array<String>? = null
+
+    /** Nomi dell'elenco che iniziano con [prefix] (ricerca binaria su chiavi ordinate). */
+    private fun keysWithPrefix(prefix: String): List<String> {
+        val keys = sortedKeys ?: gazetteer().keys.toTypedArray().also { it.sort(); sortedKeys = it }
+        var i = keys.binarySearch(prefix).let { if (it < 0) -it - 1 else it }
+        val out = mutableListOf<String>()
+        while (i < keys.size && keys[i].startsWith(prefix)) out += keys[i++]
+        return out
+    }
+
     private fun place(disp: String, lat: Double, lon: Double, cc: String, level: String, matched: String, score: Double): Place {
         val country = PlaceData.COUNTRIES[cc]?.name ?: ""
         val name = if (cc == "IT" || cc == "" || level == "paese" || country.isEmpty() || disp == country) disp else "$disp, $country"
@@ -188,7 +199,8 @@ object PlaceNames {
             val c = PlaceData.COUNTRIES.getValue(cc)
             found += Hit(3e6, alias == q, true, place(c.name, c.lat, c.lon, cc, "paese", alias, 0.0))
         }
-        for ((key, entries) in gazetteer()) if (key.startsWith(q)) for (e in entries)
+        val gaz = gazetteer()
+        for (key in keysWithPrefix(q)) for (e in gaz.getValue(key))
             found += Hit(e.pop.toDouble() * (if (e.cc == "IT") 3 else 1), key == q, false, place(e.disp, e.lat, e.lon, e.cc, "città", key, e.pop.toDouble()))
         // la stessa località ha molti nomi (Parigi, Parigge…): si raggruppa per posizione e si
         // mostra un nome solo, preferendo quelli scritti a mano e quelli italiani

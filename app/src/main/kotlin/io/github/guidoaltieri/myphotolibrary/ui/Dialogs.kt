@@ -58,6 +58,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import io.github.guidoaltieri.myphotolibrary.core.Fmt
 import io.github.guidoaltieri.myphotolibrary.core.Geo
+import io.github.guidoaltieri.myphotolibrary.core.InfoEdit
 import io.github.guidoaltieri.myphotolibrary.core.Item
 import io.github.guidoaltieri.myphotolibrary.core.PlaceNames
 import io.github.guidoaltieri.myphotolibrary.data.Exporter
@@ -150,7 +151,7 @@ fun DateDialog(ids: List<Long>, onDismiss: () -> Unit) {
                     }
                     Text("Usa valori negativi per spostare indietro.", style = MaterialTheme.typography.bodySmall)
                 } else {
-                    Text("Attuale: ${Fmt.datetime(first.taken)}", style = MaterialTheme.typography.bodySmall)
+                    Text(InfoEdit.dateDescription(items), style = MaterialTheme.typography.bodySmall)
                     Spacer(Modifier.height(8.dp))
                     TextButton(onClick = { pickDate = true }) { Text(Fmt.dayLong(Fmt.ts(date))) }
                     TextButton(onClick = { pickTime = true }) { Text("%02d:%02d".format(date.hour, date.minute)) }
@@ -209,6 +210,7 @@ fun LocationDialog(ids: List<Long>, onDismiss: () -> Unit) {
     var offline by remember { mutableStateOf<List<io.github.guidoaltieri.myphotolibrary.core.Place>>(emptyList()) }
     var online by remember { mutableStateOf<List<Geo.Found>>(emptyList()) }
     var searching by remember { mutableStateOf(false) }
+    val current = load(ids, initial = "") { InfoEdit.placeDescription(repo.items(ids)) }
     LaunchedEffect(query) {
         delay(200)
         offline = withContext(Dispatchers.Default) { PlaceNames.search(query, 8) }
@@ -227,6 +229,7 @@ fun LocationDialog(ids: List<Long>, onDismiss: () -> Unit) {
         title = { Text("Modifica luogo") },
         text = {
             Column {
+                if (current.isNotEmpty()) Text(current, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 6.dp))
                 OutlinedTextField(query, { query = it }, label = { Text("Luogo o coordinate (45.46, 9.19)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 LazyColumn(Modifier.heightIn(max = 320.dp)) {
                     val coords = Geo.parseCoords(query)

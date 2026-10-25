@@ -73,20 +73,20 @@ class MetaReader(private val ctx: Context) {
         } catch (e: Exception) {
             // formati senza EXIF leggibile (BMP, alcuni RAW): restano i dati del file
         }
-        // dimensioni dall'intestazione dell'immagine
-        val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        try {
-            ctx.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts) }
-        } catch (e: Exception) {
-        }
-        val head = readHead(uri, if (extension(name) in setOf("jpg", "jpeg", "jpe")) 512 * 1024 else 1024 * 1024)
-        var w = opts.outWidth.takeIf { it > 0 } ?: 0
-        var h = opts.outHeight.takeIf { it > 0 } ?: 0
         val ex = exif
+        // dimensioni: ExifInterface le legge dall'intestazione (JPEG, HEIF, PNG, WebP); altrimenti si decodificano i limiti
+        var w = ex?.getAttributeInt(ExifInterface.TAG_IMAGE_WIDTH, 0) ?: 0
+        var h = ex?.getAttributeInt(ExifInterface.TAG_IMAGE_LENGTH, 0) ?: 0
+        if (w <= 0 || h <= 0) {
+            val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            try {
+                ctx.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts) }
+            } catch (e: Exception) {
+            }
+            w = maxOf(0, opts.outWidth); h = maxOf(0, opts.outHeight)
+        }
         var xmp = ""
         if (ex != null) {
-            if (w == 0) w = ex.getAttributeInt(ExifInterface.TAG_IMAGE_WIDTH, 0)
-            if (h == 0) h = ex.getAttributeInt(ExifInterface.TAG_IMAGE_LENGTH, 0)
             val orient = ex.getAttributeInt(ExifInterface.TAG_ORIENTATION, 1)
             if (orient in 5..8) {
                 val t = w; w = h; h = t
@@ -103,9 +103,7 @@ class MetaReader(private val ctx: Context) {
             m.focal = ex.getAttributeDouble(ExifInterface.TAG_FOCAL_LENGTH, 0.0).takeIf { it > 0 }
             m.focal35 = ex.getAttributeDouble(ExifInterface.TAG_FOCAL_LENGTH_IN_35MM_FILM, 0.0).takeIf { it > 0 }
             ex.getAttribute(ExifInterface.TAG_FLASH)?.toIntOrNull()?.let { m.flash = it and 1 }
-            m.taken = MediaInfo.parseExifDate(ex.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL) ?: ex.getAttribute(ExifInterface.TAG_DATETIME_DIGITIZED),
-                ex.getAttribute(ExifInterface.TAG_OFFSET_TIME_ORIGINAL))
-                ?: MediaInfo.parseExifDate(ex.getAttribute(ExifInterface.TAG_DATETIME), ex.getAttribute(ExifInterface.TAG_OFFSET_TIME))
+            m.modifyDate = MediaInfo.parseExifDate(ex.getAttribute(ExifInterface.TAG_DATETIME))
             ex.latLong?.let { (lat, lon) ->
                 if (MediaInfo.validCoords(lat, lon)) {
                     m.lat = lat; m.lon = lon
@@ -133,18 +131,25 @@ class MetaReader(private val ctx: Context) {
             }
             m.exif = readable
         }
+        // l'intestazione si legge solo se serve: XMP non esposto da ExifInterface o numero di fotogrammi
+        val ext = extension(name)
+        val needsFrames = ext in setOf("gif", "webp", "png")
+        // (nei JPEG ExifInterface legge già il blocco XMP: se manca, il file non ce l'ha)
+        val jpeg = ext in setOf("jpg", "jpeg", "jpe")
+        val head = if ((xmp.isEmpty() && !(jpeg && ex != null)) || needsFrames) readHead(uri, 256 * 1024) else ByteArray(0)
         if (xmp.isEmpty()) xmp = xmpFrom(head)
+        // data di scatto: ora «sull'orologio», poi XMP e GPS (come ArchPhotos); la data di modifica è solo una stima
+        m.taken = MediaInfo.imageDate(ex?.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL), ex?.getAttribute(ExifInterface.TAG_DATETIME_DIGITIZED),
+            xmp, ex?.gpsDateTime?.takeIf { it > 0 }?.let { it / 1000.0 })
         m.width = w; m.height = h
         if (xmp.isNotEmpty()) {
             MediaInfo.xmpValues(xmp, "dc:description").firstOrNull()?.let { m.caption = it }
             m.title = MediaInfo.xmpValues(xmp, "dc:title").firstOrNull() ?: ""
             m.keywords = (MediaInfo.xmpValues(xmp, "dc:subject") + MediaInfo.xmpValues(xmp, "lr:hierarchicalSubject")).toSortedSet().toList()
             m.rating = MediaInfo.xmpValues(xmp, "xmp:Rating").firstOrNull()?.toDoubleOrNull()?.toInt() ?: 0
-            if (m.taken == null) (MediaInfo.xmpValues(xmp, "photoshop:DateCreated") + MediaInfo.xmpValues(xmp, "xmp:CreateDate"))
-                .firstOrNull()?.let { m.taken = MediaInfo.parseExifDate(it.replace("T", " ")) }
         }
         val comment = ex?.getAttribute(ExifInterface.TAG_USER_COMMENT)?.trim().orEmpty()
-        m.flags = MediaInfo.photoFlags(name, m.lens.orEmpty(), comment, xmp, w, h, frames(head, name), extension(name).uppercase(), relpath)
+        m.flags = MediaInfo.photoFlags(name, m.lens.orEmpty(), comment, xmp, w, h, if (needsFrames) frames(head, name) else 1, ext.uppercase(), relpath)
         if (Regex("burst", RegexOption.IGNORE_CASE).containsMatchIn(name)) m.flags += "burst"
         if ("live" in m.flags) m.motionOffset = MediaInfo.motionOffset(xmp, size)
         return m

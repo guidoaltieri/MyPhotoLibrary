@@ -12,12 +12,14 @@ import android.net.Uri
 import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.util.Size
-import androidx.exifinterface.media.ExifInterface
 import io.github.guidoaltieri.myphotolibrary.core.Edit
 import io.github.guidoaltieri.myphotolibrary.core.Item
 import io.github.guidoaltieri.myphotolibrary.core.MediaInfo
+import io.github.guidoaltieri.myphotolibrary.core.RawPreview
 import io.github.guidoaltieri.myphotolibrary.core.Recipe
 import java.io.File
+import java.io.FileInputStream
+import java.nio.ByteBuffer
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -53,14 +55,15 @@ object Images {
 
     /**
      * Decodifica con il lato lungo al massimo [maxSide] (0 = piena risoluzione). ImageDecoder
-     * applica l'orientamento EXIF; per i RAW non decodificabili si usa l'anteprima incorporata.
+     * applica l'orientamento EXIF. Per i RAW si usa prima l'anteprima JPEG incorporata (si legge
+     * solo quella, non i 20-30 MB del file), come in ArchPhotos.
      */
     fun decode(ctx: Context, uri: Uri, name: String, maxSide: Int): Bitmap? {
+        if (MediaInfo.isRaw(name)) rawPreview(ctx, uri, maxSide)?.let { return it }
         try {
             val src = ImageDecoder.createSource(ctx.contentResolver, uri)
             return ImageDecoder.decodeBitmap(src) { decoder, info, _ ->
                 decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
-                decoder.isMutableRequired = false
                 val w = info.size.width; val h = info.size.height
                 if (maxSide > 0 && max(w, h) > maxSide) {
                     val k = maxSide.toDouble() / max(w, h)
@@ -69,16 +72,6 @@ object Images {
             }
         } catch (e: Exception) {
             // formati non gestiti da ImageDecoder
-        }
-        // RAW e formati non gestiti: anteprima incorporata nell'EXIF
-        run {
-            try {
-                ctx.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
-                    val ex = ExifInterface(pfd.fileDescriptor)
-                    ex.thumbnailBitmap?.let { return rotateExif(it, ex.rotationDegrees, ex.isFlipped) }
-                }
-            } catch (e: Exception) {
-            }
         }
         return try {
             val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -91,11 +84,47 @@ object Images {
         }
     }
 
-    private fun rotateExif(b: Bitmap, degrees: Int, flipped: Boolean): Bitmap {
-        if (degrees == 0 && !flipped) return b
+    /** Anteprima incorporata in un RAW (la più piccola che basta per [maxSide]), ruotata come il RAW. */
+    private fun rawPreview(ctx: Context, uri: Uri, maxSide: Int): Bitmap? = try {
+        ctx.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+            FileInputStream(pfd.fileDescriptor).channel.use { ch ->
+                val src = RawPreview.Source { pos, n ->
+                    val buf = ByteBuffer.allocate(n)
+                    var p = pos
+                    while (buf.hasRemaining()) {
+                        val r = ch.read(buf, p)
+                        if (r <= 0) break
+                        p += r
+                    }
+                    buf.array().copyOf(buf.position())
+                }
+                val bytes = RawPreview.read(src, maxSide) ?: return@use null
+                val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+                var sample = 1
+                if (maxSide > 0) while (max(opts.outWidth, opts.outHeight) / (sample * 2) >= maxSide) sample *= 2
+                val b = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
+                    ?: return@use null
+                orient(b, RawPreview.orientation(src))
+            }
+        }
+    } catch (e: Exception) {
+        null
+    }
+
+    /** Applica un orientamento EXIF (1-8) a una bitmap. */
+    private fun orient(b: Bitmap, o: Int): Bitmap {
+        if (o <= 1 || o > 8) return b
         val m = Matrix()
-        if (flipped) m.postScale(-1f, 1f)
-        m.postRotate(degrees.toFloat())
+        when (o) {
+            2 -> m.postScale(-1f, 1f)
+            3 -> m.postRotate(180f)
+            4 -> m.postScale(1f, -1f)
+            5 -> { m.postRotate(90f); m.postScale(-1f, 1f) }
+            6 -> m.postRotate(90f)
+            7 -> { m.postRotate(270f); m.postScale(-1f, 1f) }
+            8 -> m.postRotate(270f)
+        }
         return Bitmap.createBitmap(b, 0, 0, b.width, b.height, m, true)
     }
 
@@ -138,31 +167,33 @@ object Images {
     /** Regolazioni di luce e colore (Edit.tone) su una Bitmap. */
     fun tone(src: Bitmap, adj: Map<String, Double>): Bitmap {
         if (adj.values.none { kotlin.math.abs(it) > 1e-3 }) return src
-        val b = if (src.config == Bitmap.Config.ARGB_8888) src else src.copy(Bitmap.Config.ARGB_8888, false)
-        val w = b.width; val h = b.height
-        val px = IntArray(w * h)
-        b.getPixels(px, 0, w, 0, 0, w, h)
-        val out = Edit.tone(px, w, h, adj)
-        return Bitmap.createBitmap(out, w, h, Bitmap.Config.ARGB_8888)
+        return Bitmap.createBitmap(Edit.tone(pixels(src), src.width, src.height, adj), src.width, src.height, Bitmap.Config.ARGB_8888)
     }
 
     /** Applica la ricetta completa (anteprime, miniature, esportazione). */
     fun render(src: Bitmap, recipe: Recipe): Bitmap = tone(geometry(src, recipe), Edit.combinedAdjust(recipe))
 
+    /**
+     * Anteprima dell'editor. In Ritaglia si vede l'immagine intera (raddrizzata, ruotata e con le
+     * regolazioni): il riquadro di ritaglio viene disegnato sopra dall'interfaccia.
+     */
+    fun preview(src: Bitmap, recipe: Recipe, cropMode: Boolean): Bitmap =
+        if (cropMode) tone(geometry(src, recipe, withCrop = false), Edit.combinedAdjust(recipe)) else render(src, recipe)
+
     fun render(src: Bitmap, edits: String?): Bitmap = if (edits.isNullOrEmpty()) src else render(src, Edit.load(edits))
+
+    /** La stessa immagine in ARGB_8888 software (richiesto da getPixels, OpenCV e dalle regolazioni). */
+    fun argb(b: Bitmap): Bitmap = if (b.config == Bitmap.Config.ARGB_8888) b else b.copy(Bitmap.Config.ARGB_8888, false)
 
     fun pixels(b: Bitmap): IntArray {
         val px = IntArray(b.width * b.height)
-        val bb = if (b.config == Bitmap.Config.ARGB_8888) b else b.copy(Bitmap.Config.ARGB_8888, false)
-        bb.getPixels(px, 0, b.width, 0, 0, b.width, b.height)
+        argb(b).getPixels(px, 0, b.width, 0, 0, b.width, b.height)
         return px
     }
 
     /** Hash percettivo (difference hash, 64 bit) per trovare i duplicati. */
     fun dhash(b: Bitmap): Long {
-        val s = Bitmap.createScaledBitmap(if (b.config == Bitmap.Config.HARDWARE) b.copy(Bitmap.Config.ARGB_8888, false) else b, 9, 8, true)
-        val px = IntArray(72)
-        s.getPixels(px, 0, 9, 0, 0, 9, 8)
+        val px = pixels(Bitmap.createScaledBitmap(argb(b), 9, 8, true))
         val gray = IntArray(72) { val p = px[it]; (((p shr 16) and 0xFF) * 299 + ((p shr 8) and 0xFF) * 587 + (p and 0xFF) * 114) / 1000 }
         return Edit.dhash(gray)
     }

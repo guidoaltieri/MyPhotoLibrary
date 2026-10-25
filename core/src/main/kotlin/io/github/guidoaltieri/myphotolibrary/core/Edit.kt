@@ -127,6 +127,26 @@ object Edit {
         return 1.0 / (cos(a) + long / short * sin(a))
     }
 
+    /** Dimensioni dell'immagine dopo la rotazione della ricetta, senza ritaglio. */
+    fun orientedSize(width: Int, height: Int, r: Recipe): Pair<Int, Int> =
+        if (r.rotate % 180 != 0) height to width else width to height
+
+    /** Rapporto da imporre al ritaglio: `0` in [ASPECTS] vuol dire «come la foto». */
+    fun aspectRatio(ratio: Double?, width: Int, height: Int, r: Recipe): Double? =
+        if (ratio == 0.0) orientedSize(width, height, r).let { (w, h) -> w.toDouble() / h } else ratio
+
+    /** Il riquadro (relativo) segue la foto ruotata di 90° ([degrees] = 90) o -90°. */
+    fun rotateCrop(crop: List<Double>, degrees: Int): List<Double> {
+        val (x, y, w, h) = crop
+        return if (degrees == 90) listOf(1 - y - h, x, h, w) else listOf(y, 1 - x - w, h, w)
+    }
+
+    /** Il riquadro segue la foto riflessa in orizzontale ([horizontal]) o in verticale. */
+    fun flipCrop(crop: List<Double>, horizontal: Boolean): List<Double> {
+        val (x, y, w, h) = crop
+        return if (horizontal) listOf(1 - x - w, y, w, h) else listOf(x, 1 - y - h, w, h)
+    }
+
     /** Riquadro del ritaglio in pixel (sinistra, alto, destra, basso), o null se non serve. */
     fun cropBox(w: Int, h: Int, crop: List<Double>?): IntArray? {
         if (crop == null || crop.size < 4) return null
@@ -384,6 +404,4 @@ object Edit {
         }
         return bits
     }
-
-    fun hamming(a: Long, b: Long) = java.lang.Long.bitCount(a xor b)
 }

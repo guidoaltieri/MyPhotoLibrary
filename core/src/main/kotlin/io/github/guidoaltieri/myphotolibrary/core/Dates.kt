@@ -137,5 +137,4 @@ object Dates {
     fun rootedPath(sourceName: String?, relpath: String): String =
         if (sourceName.isNullOrEmpty() || relpath.startsWith("$sourceName/")) relpath else "$sourceName/$relpath"
 
-    fun describeLevel(level: String) = mapOf("anno" to "l'anno", "mese" to "anno e mese", "giorno" to "la data")[level] ?: level
 }

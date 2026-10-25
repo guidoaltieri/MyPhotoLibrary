@@ -55,5 +55,4 @@ class Settings(context: Context) {
     val importDeleteAfter = Pref("import_delete_after", false)
     /** durata di ogni foto nella presentazione (secondi) */
     val slideSeconds = Pref("slide_seconds", 3)
-    val firstRun = Pref("first_run", true)
 }

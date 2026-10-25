@@ -29,8 +29,8 @@ fun Row.str(k: String): String? = this[k]?.let { if (it is ByteArray) String(it)
 fun Row.bool(k: String): Boolean = ((this[k] as? Number)?.toLong() ?: 0L) != 0L
 fun Row.blob(k: String): ByteArray? = this[k] as? ByteArray
 
-/** "(?,?,?)" e i parametri per una clausola IN. */
-fun inClause(ids: Collection<Long>): Pair<String, List<Any?>> {
-    val list = if (ids.isEmpty()) listOf(0L) else ids.toList()
-    return "(" + list.joinToString(",") { "?" } + ")" to list
-}
+/**
+ * «(1,2,3)» per una clausola IN: gli id sono numeri, quindi si scrivono nella query senza rischi,
+ * e così non si supera il limite di 999 parametri di SQLite su Android 10.
+ */
+fun idList(ids: Collection<Long>): String = "(" + (if (ids.isEmpty()) "0" else ids.joinToString(",")) + ")"

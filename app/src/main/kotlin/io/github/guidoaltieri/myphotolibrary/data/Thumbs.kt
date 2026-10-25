@@ -19,7 +19,12 @@ import kotlinx.coroutines.withContext
 import java.io.IOException
 
 /** Miniatura di un elemento (con le modifiche applicate, se ce ne sono). */
-data class Thumb(val item: Item, val size: Int = 384)
+data class Thumb(val item: Item, val size: Int = 256) {
+    companion object {
+        /** Dimensione della miniatura per una cella di [cellPx] pixel fisici. */
+        fun sizeFor(cellPx: Int) = if (cellPx <= 320) 256 else 512
+    }
+}
 
 /** Immagine per il visore con lato lungo ≤ [maxSide] (0 = piena risoluzione), modifiche comprese. */
 data class Full(val item: Item, val maxSide: Int, val applyEdits: Boolean = true)

@@ -38,6 +38,7 @@ import io.github.guidoaltieri.myphotolibrary.core.ImportInfo
 import io.github.guidoaltieri.myphotolibrary.core.Item
 import io.github.guidoaltieri.myphotolibrary.core.Library
 import io.github.guidoaltieri.myphotolibrary.core.PlaceNames
+import io.github.guidoaltieri.myphotolibrary.core.Suggestions
 
 /** Duplicati: stessa immagine (hash percettivo) o stesso file; l'unione conserva preferiti, album e parole chiave. */
 @Composable
@@ -128,16 +129,21 @@ fun SuggestionsScreen() {
     fun applyDates(groups: List<Dates.SuggestionGroup>) = repo.io {
         val values = groups.flatMap { g -> g.items.map { it.item.id to it.suggested } }
         repo.lib.setTakenMany(values)
-        repo.say("Date corrette: ${values.size}")
+        repo.say("Data corretta per ${Fmt.count(values.size.toLong(), "foto", "foto")}")
         repo.changed()
         repo.writeToFiles(values.map { it.first }, date = true, location = false)
     }
     fun applyPlaces(groups: List<PlaceNames.PlaceGroup>) = repo.io {
         val values = groups.flatMap { g -> g.items.map { Library.Located(it.id, g.lat, g.lon, g.place) } }
         repo.lib.setLocationMany(values)
-        repo.say("Luoghi aggiunti: ${values.size}")
+        repo.say("Posizione aggiunta a ${Fmt.count(values.size.toLong(), "foto", "foto")}")
         repo.changed()
         repo.writeToFiles(values.map { it.id }, date = false, location = true)
+    }
+    /** Ignora, con «Annulla» nel messaggio (come in ArchPhotos). */
+    fun ignore(ids: List<Long>, set: (Collection<Long>, Boolean) -> Unit) = repo.io {
+        set(ids, true)
+        repo.undoable(Fmt.count(ids.size.toLong(), "suggerimento ignorato", "suggerimenti ignorati")) { set(ids, false); repo.changed() }
     }
     Scaffold(topBar = {
         Bar("Suggerimenti", onBack = { nav.back() }) {
@@ -151,16 +157,15 @@ fun SuggestionsScreen() {
                 Tab(tab == 1, { tab = 1 }, text = { Text("Luoghi (${places?.sumOf { it.items.size } ?: 0})") })
             }
             if (tab == 0) {
-                if (dates != null && dates.isEmpty()) Empty("Nessun suggerimento",
-                    "Le date corrispondono alle cartelle che le contengono (2024, 2024/05, Maggio 2024, 2024-05-12 Vacanze…).")
+                if (dates != null && dates.isEmpty()) Empty(Suggestions.EMPTY_TITLE, Suggestions.EMPTY_DATES)
                 LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    if (!dates.isNullOrEmpty()) item { SuggestionIntro(Suggestions.datesHeader(dates), Suggestions.DATES_TEXT) }
                     items(dates.orEmpty(), key = { "${it.sourceId}:${it.dir}" }) { g ->
                         Card {
                             Column(Modifier.padding(12.dp)) {
-                                Text(g.dir.ifEmpty { "/" }, fontWeight = FontWeight.SemiBold)
-                                val lvl = g.items.first().level
-                                Text("${Fmt.count(g.items.size.toLong(), "foto", "foto")}: cambia ${Dates.describeLevel(lvl)} secondo la cartella «${g.folder}»",
-                                    style = MaterialTheme.typography.bodySmall)
+                                val (title, sub) = Suggestions.dateCard(g)
+                                Text(title, fontWeight = FontWeight.SemiBold)
+                                Text(sub, style = MaterialTheme.typography.bodySmall)
                                 g.items.take(3).forEach { s ->
                                     Text("${s.item.name}: ${Fmt.shortDate(s.item.taken)} → ${Fmt.shortDate(s.suggested)}${if (s.fromName) " (dal nome)" else ""}",
                                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -168,7 +173,7 @@ fun SuggestionsScreen() {
                                 if (g.items.size > 3) Text("…e altre ${g.items.size - 3}", style = MaterialTheme.typography.bodySmall)
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
                                     Button(onClick = { applyDates(listOf(g)) }) { Text("Applica") }
-                                    OutlinedButton(onClick = { repo.io { repo.lib.ignoreSuggestions(g.items.map { it.item.id }) } }) { Text("Ignora") }
+                                    OutlinedButton(onClick = { ignore(g.items.map { it.item.id }, repo.lib::ignoreSuggestions) }) { Text("Ignora") }
                                     TextButton(onClick = { nav.go(Screen.Ids(g.items.map { it.item.id }, g.dir.substringAfterLast("/"))) }) { Text("Mostra") }
                                 }
                             }
@@ -176,21 +181,21 @@ fun SuggestionsScreen() {
                     }
                 }
             } else {
-                if (places != null && places.isEmpty()) Empty("Nessun suggerimento",
-                    "Alle foto senza posizione viene proposto il luogo citato nel nome della cartella o del file (es. «Vacanze Parigi», «Roma_Colosseo_014.jpg»).")
+                if (places != null && places.isEmpty()) Empty(Suggestions.EMPTY_TITLE, Suggestions.EMPTY_PLACES)
                 LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    if (!places.isNullOrEmpty()) item { SuggestionIntro(Suggestions.placesHeader(places), Suggestions.PLACES_TEXT) }
                     items(places.orEmpty(), key = { "${it.sourceId}:${it.dir}:${it.place}:${it.evidence}" }) { g ->
                         Card {
                             Column(Modifier.padding(12.dp)) {
-                                Text(g.place, fontWeight = FontWeight.SemiBold)
-                                Text("${Fmt.count(g.items.size.toLong(), "foto", "foto")} in ${g.dir.ifEmpty { "/" }} · ${g.level} · dal ${g.evidence}",
-                                    style = MaterialTheme.typography.bodySmall)
+                                val (title, sub) = Suggestions.placeCard(g)
+                                Text(title, fontWeight = FontWeight.SemiBold)
+                                Text(sub, style = MaterialTheme.typography.bodySmall)
                                 LazyRow(horizontalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.padding(top = 6.dp)) {
                                     items(g.items.take(12), key = { it.id }) { ThumbImage(it, Modifier.size(56.dp)) }
                                 }
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
                                     Button(onClick = { applyPlaces(listOf(g)) }) { Text("Applica") }
-                                    OutlinedButton(onClick = { repo.io { repo.lib.ignorePlaceSuggestions(g.items.map { it.id }) } }) { Text("Ignora") }
+                                    OutlinedButton(onClick = { ignore(g.items.map { it.id }, repo.lib::ignorePlaceSuggestions) }) { Text("Ignora") }
                                     TextButton(onClick = { nav.go(Screen.Ids(g.items.map { it.id }, g.place)) }) { Text("Mostra") }
                                 }
                             }
@@ -199,5 +204,13 @@ fun SuggestionsScreen() {
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SuggestionIntro(header: String, text: String) {
+    Column(Modifier.padding(horizontal = 4.dp)) {
+        Text(header, style = MaterialTheme.typography.titleMedium)
+        Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }

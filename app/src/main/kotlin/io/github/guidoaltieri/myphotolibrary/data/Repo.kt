@@ -52,10 +52,16 @@ class Repo(val ctx: Context) {
     }
 
     val task = MutableStateFlow<Task?>(null)
-    /** Messaggi brevi per l'utente (snackbar). */
-    val messages = MutableSharedFlow<String>(extraBufferCapacity = 16)
+    /** Messaggio breve per l'utente, con un'azione facoltativa (es. «Annulla»). */
+    class Message(val text: String, val action: String? = null, val onAction: (suspend () -> Unit)? = null)
+    val messages = MutableSharedFlow<Message>(extraBufferCapacity = 16)
     fun say(text: String) {
-        messages.tryEmit(text)
+        messages.tryEmit(Message(text))
+    }
+
+    /** Messaggio con «Annulla». */
+    fun undoable(text: String, undo: suspend () -> Unit) {
+        messages.tryEmit(Message(text, "Annulla", undo))
     }
 
     // --- richieste al sistema (consenso per eliminare/modificare, attività da avviare) -----------
@@ -95,7 +101,6 @@ class Repo(val ctx: Context) {
 
     // --- scansione ---------------------------------------------------------------------------
     private val scanLock = Mutex()
-    private var scanJob: Job? = null
 
     /** Aggiorna le sorgenti (tutte o [sourceIds]), poi luoghi, hash e volti. */
     fun scan(sourceIds: List<Long>? = null, full: Boolean = false, after: (suspend () -> Unit)? = null): Job = scope.launch {
@@ -115,7 +120,7 @@ class Repo(val ctx: Context) {
             after?.invoke()
         }
         background()
-    }.also { scanJob = it }
+    }
 
     private var bgJob: Job? = null
 
@@ -196,8 +201,8 @@ class Repo(val ctx: Context) {
         // file non eliminati (consenso negato): tornano tra gli eliminati di recente
         val kept = rows.filter { it.path !in deleted }.map { it.id }
         if (kept.isNotEmpty()) {
-            val (q, p) = io.github.guidoaltieri.myphotolibrary.core.inClause(kept)
-            db.exec("UPDATE media SET paired = 0 WHERE id IN $q", p)
+            val q = io.github.guidoaltieri.myphotolibrary.core.idList(kept)
+            db.exec("UPDATE media SET paired = 0 WHERE id IN $q")
             say("${kept.size} elementi non eliminati")
         }
         changed()
@@ -219,5 +224,5 @@ class Repo(val ctx: Context) {
         if (r.ok > 0) scan(items.map { it.sourceId }.distinct())
     }
 
-    fun items(ids: Collection<Long>): List<Item> = ids.mapNotNull { lib.item(it) }
+    fun items(ids: Collection<Long>): List<Item> = lib.items(ids)
 }

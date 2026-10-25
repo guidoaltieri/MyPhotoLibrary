@@ -15,7 +15,14 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -92,12 +99,19 @@ class MainActivity : ComponentActivity() {
         setContent {
             val theme by repo.settings.theme.flow.collectAsState()
             val snackbar = remember { SnackbarHostState() }
-            LaunchedEffect(Unit) { repo.messages.collect { snackbar.showSnackbar(it) } }
+            // messaggi visibili in tutte le schermate, con l'eventuale «Annulla»
+            LaunchedEffect(Unit) {
+                repo.messages.collect { m ->
+                    val r = snackbar.showSnackbar(m.text, actionLabel = m.action, duration = if (m.action != null) SnackbarDuration.Long else SnackbarDuration.Short)
+                    if (r == SnackbarResult.ActionPerformed) m.onAction?.let { repo.io(it) }
+                }
+            }
             AppTheme(theme) {
                 CompositionLocalProvider(LocalRepo provides repo, LocalNav provides nav) {
                     BackHandler(nav.stack.size > 1) { nav.back() }
                     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-                        AppContent(snackbar, hasPermission) { requestPermissions() }
+                        AppContent(hasPermission) { requestPermissions() }
+                        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 80.dp))
                     }
                 }
             }

@@ -142,11 +142,3 @@ fun GridScreen(view: String, title: String, query: String = "", subtitle: String
 fun IdsScreen(ids: List<Long>, title: String, subtitle: String) {
     GridScreen("ids:" + ids.joinToString(","), title, subtitle = subtitle.ifEmpty { null })
 }
-
-@Composable
-fun ColumnHeader(text: String) {
-    Column(Modifier.padding(16.dp)) { Text(text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-}
-
-@Composable
-fun RowSpacer() = Row(Modifier.padding(4.dp)) {}

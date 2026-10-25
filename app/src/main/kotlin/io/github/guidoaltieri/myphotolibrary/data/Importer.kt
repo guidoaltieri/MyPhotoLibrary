@@ -1,6 +1,5 @@
 package io.github.guidoaltieri.myphotolibrary.data
 
-import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
 import android.os.Environment
@@ -14,6 +13,7 @@ import io.github.guidoaltieri.myphotolibrary.core.basename
 import io.github.guidoaltieri.myphotolibrary.core.dirname
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 
 /**
@@ -27,31 +27,8 @@ class Importer(private val ctx: Context, private val reader: MetaReader) {
 
     /** File multimediali in una cartella (ricorsivo). */
     suspend fun list(tree: Uri, known: (String, Long) -> Boolean): List<Candidate> = withContext(Dispatchers.IO) {
-        val out = ArrayList<Candidate>()
-        val rootId = DocumentsContract.getTreeDocumentId(tree)
-        val queue = ArrayDeque(listOf(rootId to ""))
-        val proj = arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME,
-            DocumentsContract.Document.COLUMN_MIME_TYPE, DocumentsContract.Document.COLUMN_SIZE, DocumentsContract.Document.COLUMN_LAST_MODIFIED)
-        while (queue.isNotEmpty()) {
-            ensureActive()
-            val (id, rel) = queue.removeFirst()
-            ctx.contentResolver.query(DocumentsContract.buildChildDocumentsUriUsingTree(tree, id), proj, null, null, null)?.use { c ->
-                while (c.moveToNext()) {
-                    val cid = c.getString(0) ?: continue
-                    val name = c.getString(1) ?: continue
-                    if (name.startsWith(".")) continue
-                    val r = if (rel.isEmpty()) name else "$rel/$name"
-                    if (c.getString(2) == DocumentsContract.Document.MIME_TYPE_DIR) {
-                        queue.addLast(cid to r); continue
-                    }
-                    if (!MediaInfo.isMedia(name)) continue
-                    val size = if (c.isNull(3)) 0L else c.getLong(3)
-                    out += Candidate(DocumentsContract.buildDocumentUriUsingTree(tree, cid), name, r, size,
-                        if (c.isNull(4)) 0.0 else c.getLong(4) / 1000.0, known(name, size))
-                }
-            }
-        }
-        out.sortedBy { it.relpath }
+        val files = Storage.walkTree(ctx, tree, cancelled = { !isActive }) ?: throw java.io.IOException("Cartella non leggibile")
+        files.map { Candidate(it.uri, it.name, it.relpath, it.size, it.mtime, known(it.name, it.size)) }.sortedBy { it.relpath }
     }
 
     /** Destinazione: Immagini/MyPhotoLibrary sul dispositivo (MediaStore). */
@@ -75,28 +52,8 @@ class Importer(private val ctx: Context, private val reader: MetaReader) {
 
         override fun listFiles(rel: String): Map<String, Long> = rows.filter { it.first == rel }.associate { it.second to it.third }
 
-        fun put(src: Uri, relFile: String): Uri {
-            val name = basename(relFile)
-            val dir = dirname(relFile)
-            val video = MediaInfo.isVideo(name)
-            val cv = ContentValues().apply {
-                put(MediaStore.MediaColumns.DISPLAY_NAME, name)
-                put(MediaStore.MediaColumns.MIME_TYPE, MediaInfo.mimeType(name))
-                put(MediaStore.MediaColumns.RELATIVE_PATH, if (dir.isEmpty()) "$base/" else "$base/$dir/")
-                put(MediaStore.MediaColumns.IS_PENDING, 1)
-            }
-            val coll = if (video) MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-            else MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-            val uri = ctx.contentResolver.insert(coll, cv) ?: throw java.io.IOException("Impossibile creare $name")
-            try {
-                ctx.contentResolver.openOutputStream(uri)?.use { out -> ctx.contentResolver.openInputStream(src)?.use { it.copyTo(out, 1 shl 16) } }
-                ctx.contentResolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
-            } catch (e: Exception) {
-                ctx.contentResolver.delete(uri, null, null)
-                throw e
-            }
-            return uri
-        }
+        fun put(src: Uri, relFile: String): Uri =
+            Storage.insertMedia(ctx, basename(relFile), listOf(base, dirname(relFile)).filter { it.isNotEmpty() }.joinToString("/"), Storage.copyFrom(ctx, src))
     }
 
     /** Destinazione: una cartella scelta con il selettore di sistema (anche di un'app cloud). */
@@ -139,14 +96,7 @@ class Importer(private val ctx: Context, private val reader: MetaReader) {
             return id
         }
 
-        fun put(src: Uri, relFile: String): Uri {
-            val pid = dirId(dirname(relFile))
-            val name = basename(relFile)
-            val doc = DocumentsContract.createDocument(ctx.contentResolver, DocumentsContract.buildDocumentUriUsingTree(tree, pid),
-                MediaInfo.mimeType(name), name) ?: throw java.io.IOException("Impossibile creare $name")
-            ctx.contentResolver.openOutputStream(doc)?.use { out -> ctx.contentResolver.openInputStream(src)?.use { it.copyTo(out, 1 shl 16) } }
-            return doc
-        }
+        fun put(src: Uri, relFile: String): Uri = Storage.createInTree(ctx, tree, dirId(dirname(relFile)), basename(relFile), Storage.copyFrom(ctx, src))
     }
 
     data class Progress(val done: Int, val total: Int, val name: String)

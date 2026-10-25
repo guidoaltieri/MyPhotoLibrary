@@ -67,7 +67,7 @@ fun SearchTab(sel: Selection) {
     data class Sugg(val persons: List<String>, val places: List<String>, val years: List<String>, val keywords: List<String>, val counts: Map<String, Int>)
     val sugg = load(initial = Sugg(emptyList(), emptyList(), emptyList(), emptyList(), emptyMap())) {
         Sugg(repo.lib.personNames().take(12), repo.lib.placesSummary().take(12).map { it.place.substringBefore(",") }.distinct(),
-            repo.lib.groups("year").map { it.key }.reversed(), repo.lib.allKeywords().take(20), repo.lib.viewCounts())
+            repo.lib.years(), repo.lib.allKeywords().take(20), repo.lib.viewCounts())
     }
     val cols by repo.settings.columns.flow.collectAsState()
     Column(Modifier.fillMaxSize()) {
@@ -87,12 +87,8 @@ fun SearchTab(sel: Selection) {
                 }
                 chips("Persone", sugg.persons) { "person:\"$it\"" }
                 chips("Luoghi", sugg.places) { "place:\"$it\"" }
-                chips("Tipi di media", Library.MEDIA_TYPES.filter { (sugg.counts[it] ?: 0) > 0 }.map { Library.VIEWS.getValue(it).label }) { label ->
-                    val key = Library.VIEWS.entries.first { it.value.label == label }.key
-                    mapOf("videos" to "is:video", "selfies" to "is:selfie", "live" to "is:live", "portrait" to "is:portrait",
-                        "panorama" to "is:panorama", "slomo" to "is:slomo", "burst" to "is:burst", "animated" to "is:animated",
-                        "screenshots" to "is:screenshot", "screenrec" to "is:screenrec", "raw" to "is:raw").getValue(key)
-                }
+                val types = Library.MEDIA_TYPES.filter { (sugg.counts[it] ?: 0) > 0 }.associateBy { Library.VIEWS.getValue(it).label }
+                chips("Tipi di media", types.keys.toList()) { label -> Library.MEDIA_TYPE_QUERY.getValue(types.getValue(label)) }
                 chips("Anni", sugg.years) { it }
                 chips("Parole chiave", sugg.keywords) { "keyword:\"$it\"" }
                 Text(SYNTAX_HELP, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,

@@ -41,6 +41,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
+import io.github.guidoaltieri.myphotolibrary.data.Thumb
 import androidx.compose.ui.unit.dp
 import io.github.guidoaltieri.myphotolibrary.core.Fmt
 import io.github.guidoaltieri.myphotolibrary.core.Item
@@ -106,6 +108,8 @@ fun MediaGrid(
             items.getOrNull(i)?.let { Fmt.month(it.taken) } ?: ""
         }
     }
+    val conf = LocalConfiguration.current
+    val thumbSize = Thumb.sizeFor((conf.screenWidthDp * conf.densityDpi / 160) / columns)
     Box(modifier.fillMaxSize().let { m -> if (onColumns != null) m.pinchColumns(columns) { d -> onColumns((columns + d).coerceIn(1, 10)) } else m }) {
         LazyVerticalGrid(
             columns = GridCells.Fixed(columns),
@@ -123,7 +127,7 @@ fun MediaGrid(
                             onLongClick = { selection.toggle(item.id) },
                         )
                 ) {
-                    ThumbImage(item, Modifier.fillMaxSize(), size = if (columns <= 2) 768 else 384)
+                    ThumbImage(item, Modifier.fillMaxSize(), size = thumbSize)
                     ThumbBadges(item, compact = columns >= 7)
                     if (selection.active) {
                         if (selected) Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = 0.25f)).border(2.dp, MaterialTheme.colorScheme.primary))

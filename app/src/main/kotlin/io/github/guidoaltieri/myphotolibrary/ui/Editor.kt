@@ -116,7 +116,7 @@ private fun PhotoEditor(item: Item) {
     val changed = (Edit.clean(recipe)?.toJson() ?: "") != (item.edits ?: "")
     BackHandler { if (changed) confirmExit = true else nav.back() }
     LaunchedEffect(item.id) {
-        base = withContext(Dispatchers.IO) { Images.open(ctx, item, 1600)?.let { if (it.config == Bitmap.Config.ARGB_8888) it else it.copy(Bitmap.Config.ARGB_8888, false) } }
+        base = withContext(Dispatchers.IO) { Images.open(ctx, item, 1600)?.let(Images::argb) }
         val b = base ?: return@LaunchedEffect
         // anteprime dei filtri su una versione piccola
         filterThumbs = withContext(Dispatchers.Default) {
@@ -128,7 +128,7 @@ private fun PhotoEditor(item: Item) {
         val b = base ?: return@LaunchedEffect
         delay(40)
         preview = withContext(Dispatchers.Default) {
-            if (tab == "crop") Images.geometry(b, recipe, withCrop = false).asImageBitmap() else Images.render(b, recipe).asImageBitmap()
+            Images.preview(b, recipe, cropMode = tab == "crop").asImageBitmap()
         }
     }
     Column(Modifier.fillMaxSize().background(Color.Black)) {
@@ -236,10 +236,11 @@ private fun FiltersPanel(recipe: Recipe, thumbs: Map<String, ImageBitmap>, onCha
 private fun CropPanel(recipe: Recipe, base: Bitmap?, onChange: (Recipe) -> Unit) {
     Column {
         Row(Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = { onChange(recipe.copy(rotate = (recipe.rotate + 270) % 360, crop = null)) }) {
+            // il riquadro di ritaglio segue la foto ruotata o riflessa
+            IconButton(onClick = { onChange(recipe.copy(rotate = (recipe.rotate + 270) % 360, crop = recipe.crop?.let { Edit.rotateCrop(it, -90) })) }) {
                 Icon(Icons.AutoMirrored.Filled.RotateLeft, "Ruota", tint = Color.White)
             }
-            IconButton(onClick = { onChange(recipe.copy(flipH = !recipe.flipH)) }) { Icon(Icons.Filled.Flip, "Rifletti", tint = Color.White) }
+            IconButton(onClick = { onChange(recipe.copy(flipH = !recipe.flipH, crop = recipe.crop?.let { Edit.flipCrop(it, true) })) }) { Icon(Icons.Filled.Flip, "Rifletti", tint = Color.White) }
             Text("Raddrizza ${"%.1f".format(recipe.straighten)}°", color = Color.White, modifier = Modifier.weight(1f))
             TextButton(onClick = { onChange(recipe.copy(crop = null, straighten = 0.0, aspect = null)) }) { Text("Azzera") }
         }
@@ -249,10 +250,10 @@ private fun CropPanel(recipe: Recipe, base: Bitmap?, onChange: (Recipe) -> Unit)
             items(Edit.ASPECTS) { (key, label, ratio) ->
                 FilterChip((recipe.aspect ?: "free") == key, {
                     if (ratio == null) onChange(recipe.copy(aspect = key)) else {
-                        // proporzioni dell'immagine dopo rotazione e raddrizzamento
-                        val g = base?.let { b -> if (((recipe.rotate % 180) + 180) % 180 == 90) b.height to b.width else b.width to b.height } ?: (1 to 1)
-                        val r = if (ratio == 0.0) g.first.toDouble() / g.second else ratio
-                        onChange(recipe.copy(aspect = key, crop = fitAspect(recipe.crop, r, g.first.toDouble(), g.second.toDouble())))
+                        // proporzioni dell'immagine dopo la rotazione
+                        val (w, h) = base?.let { b -> Edit.orientedSize(b.width, b.height, recipe) } ?: (1 to 1)
+                        val r = Edit.aspectRatio(ratio, base?.width ?: 1, base?.height ?: 1, recipe) ?: ratio
+                        onChange(recipe.copy(aspect = key, crop = fitAspect(recipe.crop, r, w.toDouble(), h.toDouble())))
                     }
                 }, { Text(label) })
             }

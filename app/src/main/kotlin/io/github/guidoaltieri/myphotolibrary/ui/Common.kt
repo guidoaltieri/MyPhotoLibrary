@@ -70,7 +70,7 @@ fun <T> load(vararg keys: Any?, initial: T, block: suspend () -> T): T {
 }
 
 @Composable
-fun ThumbImage(item: Item, modifier: Modifier = Modifier, size: Int = 384, crop: Boolean = true) {
+fun ThumbImage(item: Item, modifier: Modifier = Modifier, size: Int = 256, crop: Boolean = true) {
     AsyncImage(
         model = Thumb(item, size),
         contentDescription = item.name,
