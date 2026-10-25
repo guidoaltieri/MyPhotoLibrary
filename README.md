@@ -35,10 +35,32 @@ Il motore si verifica anche senza SDK: `CORE_ONLY=1 ./gradlew :core:test`.
 | **Modifica data e luogo** (stessa data, «la prima diventa…», sposta), luogo dall'elenco offline o da OpenStreetMap, **Scrivi le modifiche nei file** | Uguale (EXIF di JPEG, PNG, WebP e DNG con ExifInterface) |
 | **Suggerimenti**: date in base alle cartelle (`2024/05`, `Maggio 2024`…) e luoghi dai nomi di cartelle e file (elenco GeoNames offline) | Uguale |
 | **Ricerca** in linguaggio naturale e sintassi avanzata (`camera:`, `year:`, `is:`, `has:`, `place:`, `person:`, `added:<30d`, `OR`, `-`…) | Uguale, con alias italiani |
-| Cloud tramite rclone e iCloud Foto tramite icloudpd | Le **cartelle aggiunte** usano il selettore di Android: schede SD, USB e le app cloud che espongono le cartelle (Drive, Proton Drive, Nextcloud…). Il desktop resta lo strumento per iCloud Foto e rclone |
+| Cloud tramite rclone e iCloud Foto tramite icloudpd | Le **cartelle aggiunte** usano il selettore di Android: schede SD, USB e le app cloud che espongono le cartelle (Proton Drive, Nextcloud, OneDrive…). **iCloud Foto** si copia direttamente su una di queste cartelle (vedi sotto) |
 
 Formati: quelli che Android sa leggere (JPEG, PNG, HEIC/HEIF, AVIF, WebP, GIF, BMP, DNG; gli altri RAW con l'anteprima
 incorporata) e i video MP4, MOV, MKV, WebM, 3GP.
+
+## iCloud Foto → cloud
+
+**Raccolte → iCloud Foto** (o Sorgenti → iCloud Foto) copia tutta la fototeca di iCloud in una cartella di un cloud già
+collegato all'app, organizzata per data, e la tiene aggiornata:
+
+1. **Accesso**: Apple ID e password, poi il codice a sei cifre che compare sui dispositivi Apple. L'accesso è quello del
+   sito di iCloud (SRP: la password non viene inviata, resta cifrata nel Keystore del telefono per i rinnovi); il
+   codice serve di nuovo solo quando Apple lo richiede (in genere ogni uno o due mesi). Servono *Accedi ai dati iCloud
+   sul web* attivo e la *Protezione avanzata dei dati* disattivata.
+2. **Destinazione**: una delle cartelle collegate in Sorgenti (app cloud che si vedono nel selettore di sistema:
+   Nextcloud, Proton Drive, OneDrive…), oppure una nuova.
+3. **Organizzazione**: Anno/Mese, Anno/Mese/Giorno, Anno, Anno-Mese, con il nome del mese, nessuna cartella o uno schema
+   personalizzato; le cartelle anno/mese già esistenti vengono riconosciute (come in Importa).
+4. **Copia in background** (WorkManager, con notifica): ogni originale passa direttamente da iCloud alla cartella, senza
+   file temporanei sul telefono, e compare subito nella libreria con data, dimensioni, posizione e preferito di iCloud;
+   le Live Photo arrivano con il loro video. A ogni apertura dell'app si copiano solo le foto nuove (la lettura
+   dell'elenco si ferma appena trova solo foto già copiate); una copia interrotta riprende da dove era arrivata.
+
+Lo spazio usato sul telefono dipende anche dall'app del cloud: alcune tengono una copia locale dei file finché non li
+hanno caricati. Album condivisi e libreria condivisa di iCloud non sono inclusi. Il protocollo è quello di
+[icloudpd](https://github.com/icloud-photos-downloader/icloud_photos_downloader), non un'API ufficiale di Apple.
 
 ## Struttura del codice
 
@@ -51,6 +73,8 @@ core/      motore in Kotlin puro (porting di archphotos/*.py), verificato con i 
   Dates.kt       date nei nomi delle cartelle e suggerimenti (dates.py)
   PlaceNames.kt  luoghi nei nomi di cartelle e file, elenco GeoNames (placenames.py)
   Planner.kt     schemi delle cartelle per le importazioni (uploader.py)
+  ICloud.kt Srp.kt ICloudSync.kt   accesso a iCloud Foto (come pyicloud/icloudpd) e copia su un cloud
+  RawPreview.kt  anteprime JPEG incorporate nei RAW (rawpreview.py)
   Faces.kt Geo.kt MediaInfo.kt Fmt.kt
 app/       app Android (Jetpack Compose)
   data/    scansione (MediaStore e cartelle), metadati, miniature, volti (OpenCV), luoghi, esportazione,

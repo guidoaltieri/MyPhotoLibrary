@@ -96,6 +96,8 @@ class MainActivity : ComponentActivity() {
             }
         }
         handleIntent(intent)
+        // a ogni apertura: foto nuove di iCloud da copiare (se la copia automatica è attiva)
+        repo.icloud.schedule()
         setContent {
             val theme by repo.settings.theme.flow.collectAsState()
             val snackbar = remember { SnackbarHostState() }

@@ -89,6 +89,7 @@ dependencies {
     implementation("androidx.sqlite:sqlite-framework:2.4.0")
     implementation("androidx.exifinterface:exifinterface:1.3.7")
     implementation("androidx.documentfile:documentfile:1.0.1")
+    implementation("androidx.work:work-runtime-ktx:2.10.0")
 
     implementation("io.coil-kt.coil3:coil-compose:3.0.4")
 

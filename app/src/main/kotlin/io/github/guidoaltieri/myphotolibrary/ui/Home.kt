@@ -143,5 +143,6 @@ fun AppContent(hasPermission: Boolean, onRequestPermission: () -> Unit) {
         Screen.Sources -> SourcesScreen()
         Screen.Settings -> SettingsScreen()
         Screen.Import -> ImportScreen()
+        Screen.ICloud -> ICloudScreen()
     }
 }

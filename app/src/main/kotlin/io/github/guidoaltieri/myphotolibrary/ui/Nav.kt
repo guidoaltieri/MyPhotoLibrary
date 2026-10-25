@@ -26,6 +26,7 @@ sealed interface Screen {
     data object Sources : Screen
     data object Settings : Screen
     data object Import : Screen
+    data object ICloud : Screen
 }
 
 class Nav {

@@ -822,6 +822,16 @@ class Library(val db: Db) {
 
     fun clearPlaceNames() = db.exec("UPDATE media SET place=NULL, f_place='' WHERE instr(user, ',lat,') = 0")
 
+    // --- iCloud Foto --------------------------------------------------------------------------
+    fun icloudSynced(record: String): Boolean = db.one("SELECT 1 x FROM icloud_assets WHERE record=?", listOf(record)) != null
+
+    fun markIcloudSynced(record: String, path: String) =
+        db.exec("INSERT OR REPLACE INTO icloud_assets(record, path, synced) VALUES (?,?,?)", listOf(record, path, now()))
+
+    fun icloudSyncedCount(): Int = db.scalarLong("SELECT COUNT(*) FROM icloud_assets").toInt()
+
+    fun clearIcloudSynced() = db.exec("DELETE FROM icloud_assets")
+
     // --- volti ----------------------------------------------------------------------------
     fun faceTodo(): List<Item> {
         val v = viewSql("library")

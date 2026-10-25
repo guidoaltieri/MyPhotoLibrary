@@ -89,6 +89,8 @@ object Schema {
             key TEXT PRIMARY KEY, name TEXT, city TEXT, region TEXT, country TEXT, fetched REAL
         )""",
         "CREATE TABLE IF NOT EXISTS imports (id INTEGER PRIMARY KEY, started REAL, origin TEXT, count INTEGER DEFAULT 0)",
+        // foto di iCloud già copiate nella destinazione (si copiano una volta sola)
+        "CREATE TABLE IF NOT EXISTS icloud_assets (record TEXT PRIMARY KEY, path TEXT, synced REAL)",
         "CREATE TABLE IF NOT EXISTS memory_state (key TEXT PRIMARY KEY, favorite INTEGER DEFAULT 0, hidden INTEGER DEFAULT 0, title TEXT)",
     )
 

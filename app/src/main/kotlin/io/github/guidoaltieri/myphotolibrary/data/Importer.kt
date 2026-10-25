@@ -3,7 +3,6 @@ package io.github.guidoaltieri.myphotolibrary.data
 import android.content.Context
 import android.net.Uri
 import android.os.Environment
-import android.provider.DocumentsContract
 import android.provider.MediaStore
 import io.github.guidoaltieri.myphotolibrary.core.Fmt
 import io.github.guidoaltieri.myphotolibrary.core.ImportTarget
@@ -56,49 +55,6 @@ class Importer(private val ctx: Context, private val reader: MetaReader) {
             Storage.insertMedia(ctx, basename(relFile), listOf(base, dirname(relFile)).filter { it.isNotEmpty() }.joinToString("/"), Storage.copyFrom(ctx, src))
     }
 
-    /** Destinazione: una cartella scelta con il selettore di sistema (anche di un'app cloud). */
-    inner class TreeTarget(val tree: Uri) : ImportTarget {
-        private val ids = HashMap<String, String>()   // cartella relativa → id del documento
-
-        init {
-            ids[""] = DocumentsContract.getTreeDocumentId(tree)
-        }
-
-        private fun children(rel: String): List<Triple<String, String, Long>> {   // (nome, mime, dimensione)
-            val id = ids[rel] ?: return emptyList()
-            val out = mutableListOf<Triple<String, String, Long>>()
-            ctx.contentResolver.query(DocumentsContract.buildChildDocumentsUriUsingTree(tree, id),
-                arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME,
-                    DocumentsContract.Document.COLUMN_MIME_TYPE, DocumentsContract.Document.COLUMN_SIZE), null, null, null)?.use { c ->
-                while (c.moveToNext()) {
-                    val name = c.getString(1) ?: continue
-                    val mime = c.getString(2) ?: ""
-                    if (mime == DocumentsContract.Document.MIME_TYPE_DIR) ids[if (rel.isEmpty()) name else "$rel/$name"] = c.getString(0)
-                    out += Triple(name, mime, if (c.isNull(3)) 0L else c.getLong(3))
-                }
-            }
-            return out
-        }
-
-        override fun listDirs(rel: String) = children(rel).filter { it.second == DocumentsContract.Document.MIME_TYPE_DIR }.map { it.first }
-        override fun listFiles(rel: String) = children(rel).filter { it.second != DocumentsContract.Document.MIME_TYPE_DIR }.associate { it.first to it.third }
-
-        private fun dirId(rel: String): String {
-            ids[rel]?.let { return it }
-            val parent = dirname(rel)
-            val pid = dirId(parent)
-            listDirs(parent)
-            ids[rel]?.let { return it }
-            val doc = DocumentsContract.createDocument(ctx.contentResolver, DocumentsContract.buildDocumentUriUsingTree(tree, pid),
-                DocumentsContract.Document.MIME_TYPE_DIR, basename(rel)) ?: throw java.io.IOException("Impossibile creare la cartella $rel")
-            val id = DocumentsContract.getDocumentId(doc)
-            ids[rel] = id
-            return id
-        }
-
-        fun put(src: Uri, relFile: String): Uri = Storage.createInTree(ctx, tree, dirId(dirname(relFile)), basename(relFile), Storage.copyFrom(ctx, src))
-    }
-
     data class Progress(val done: Int, val total: Int, val name: String)
     data class Result(val copied: List<Uri>, val skipped: Int, val errors: Int, val messages: List<String>)
 
@@ -119,7 +75,7 @@ class Importer(private val ctx: Context, private val reader: MetaReader) {
                 if (exists) skipped++ else {
                     copied += when (target) {
                         is DeviceTarget -> target.put(f.uri, rel)
-                        is TreeTarget -> target.put(f.uri, rel)
+                        is Storage.TreeTarget -> Uri.parse(target.put(rel, Storage.copyFrom(ctx, f.uri)).path)
                         else -> throw IllegalArgumentException()
                     }
                 }

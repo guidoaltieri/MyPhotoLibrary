@@ -25,12 +25,9 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
@@ -54,6 +51,7 @@ import io.github.guidoaltieri.myphotolibrary.core.Item
 import io.github.guidoaltieri.myphotolibrary.core.Layouts
 import io.github.guidoaltieri.myphotolibrary.core.MediaInfo
 import io.github.guidoaltieri.myphotolibrary.data.Importer
+import io.github.guidoaltieri.myphotolibrary.data.Storage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -78,7 +76,6 @@ fun ImportScreen() {
     val chosen = remember { mutableStateMapOf<Int, Boolean>() }
     var dest by remember { mutableStateOf<Uri?>(null) }   // null = Immagini/MyPhotoLibrary
     var layout by remember { mutableStateOf(repo.settings.importLayout.value) }
-    var custom by remember { mutableStateOf(Layouts.LAYOUTS.none { it.first == layout }) }
     var useExisting by remember { mutableStateOf(repo.settings.importUseExisting.value) }
     var deleteAfter by remember { mutableStateOf(repo.settings.importDeleteAfter.value) }
     var running by remember { mutableStateOf<Importer.Progress?>(null) }
@@ -114,7 +111,7 @@ fun ImportScreen() {
         step = 3
         scope.launch {
             try {
-                val target = withContext(Dispatchers.IO) { dest?.let { repo.importer.TreeTarget(it) } ?: repo.importer.DeviceTarget() }
+                val target = withContext(Dispatchers.IO) { dest?.let { Storage.TreeTarget(ctx, it) } ?: repo.importer.DeviceTarget() }
                 val r = repo.importer.transfer(list, target, layout, useExisting, deleteAfter) { p -> running = p }
                 result = r
                 if (r.copied.isNotEmpty()) {
@@ -177,28 +174,8 @@ fun ImportScreen() {
                         RadioButton(dest != null, { pickDest.launch(null) })
                         Text(if (dest != null) "Cartella: ${treeName(dest!!)}" else "Un'altra cartella (anche di un'app cloud)…")
                     }
-                    Text("Organizza in cartelle", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 8.dp))
-                    var open by remember { mutableStateOf(false) }
-                    ExposedDropdownMenuBox(open, { open = it }) {
-                        OutlinedTextField(if (custom) "Personalizzato" else Layouts.LAYOUTS.first { it.first == layout }.second, {}, readOnly = true,
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(open) },
-                            modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth())
-                        ExposedDropdownMenu(open, { open = false }) {
-                            Layouts.LAYOUTS.forEach { (k, l) -> DropdownMenuItem({ Text(l) }, { layout = k; custom = false; open = false }) }
-                            DropdownMenuItem({ Text("Personalizzato…") }, { custom = true; open = false })
-                        }
-                    }
-                    if (custom) {
-                        val err = Layouts.validate(layout)
-                        OutlinedTextField(layout, { layout = it }, label = { Text("Schema (${Layouts.TOKENS})") }, singleLine = true,
-                            isError = err != null, supportingText = { Text(err ?: "es. Foto {anno}/{mese} {nome_mese}") }, modifier = Modifier.fillMaxWidth())
-                    }
-                    Text(Layouts.preview(layout, if (dest == null) "Immagini/MyPhotoLibrary" else treeName(dest!!)),
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(useExisting, { useExisting = it })
-                        Text("Usa le cartelle anno/mese già esistenti (es. «05 - Maggio», «2024-05»)")
-                    }
+                    FolderLayoutPicker(layout, { layout = it }, useExisting, { useExisting = it },
+                        if (dest == null) "Immagini/MyPhotoLibrary" else treeName(dest!!))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(deleteAfter, { deleteAfter = it })
                         Text("Elimina gli originali dopo l'importazione")

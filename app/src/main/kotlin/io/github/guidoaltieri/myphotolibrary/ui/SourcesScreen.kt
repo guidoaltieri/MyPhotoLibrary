@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Smartphone
@@ -117,6 +118,10 @@ fun SourcesScreen() {
                 ListItem(headlineContent = { Text("Aggiungi una cartella…") },
                     supportingContent = { Text("Scheda SD, chiavetta USB o la cartella di un'app cloud (Drive, Proton Drive, Nextcloud…)") },
                     leadingContent = { Icon(Icons.Filled.Add, null) }, modifier = Modifier.clickable { picker.launch(null) })
+            }
+            item {
+                ListItem(headlineContent = { Text("iCloud Foto…") }, supportingContent = { Text("Copia le foto di iCloud in una di queste cartelle") },
+                    leadingContent = { Icon(Icons.Filled.Cloud, null) }, modifier = Modifier.clickable { nav.go(Screen.ICloud) })
             }
             item {
                 Text("Le cartelle aggiunte sono lette senza essere copiate. Scollega nasconde le foto di una sorgente senza dimenticarla; " +

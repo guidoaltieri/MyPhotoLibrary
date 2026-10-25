@@ -5,7 +5,10 @@ import android.content.Context
 import android.net.Uri
 import android.provider.DocumentsContract
 import android.provider.MediaStore
+import io.github.guidoaltieri.myphotolibrary.core.ICloudSync
 import io.github.guidoaltieri.myphotolibrary.core.MediaInfo
+import io.github.guidoaltieri.myphotolibrary.core.basename
+import io.github.guidoaltieri.myphotolibrary.core.dirname
 import java.io.IOException
 import java.io.OutputStream
 
@@ -86,5 +89,65 @@ object Storage {
     /** Scrittore che copia un file del dispositivo. */
     fun copyFrom(ctx: Context, src: Uri): (OutputStream) -> Unit = { out ->
         ctx.contentResolver.openInputStream(src)?.use { it.copyTo(out, 1 shl 16) } ?: throw IOException("File non leggibile")
+    }
+
+    /**
+     * Cartella scelta con il selettore di sistema (anche di un'app cloud) come destinazione di
+     * importazioni e copie da iCloud: elenca cartelle e file, crea le cartelle mancanti.
+     */
+    class TreeTarget(private val ctx: Context, val tree: Uri) : ICloudSync.Destination {
+        private val ids = HashMap<String, String>()   // cartella relativa → id del documento
+
+        init {
+            ids[""] = DocumentsContract.getTreeDocumentId(tree)
+        }
+
+        private fun children(rel: String): List<Triple<String, String, Long>> {   // (nome, mime, dimensione)
+            val id = ids[rel] ?: return emptyList()
+            val out = mutableListOf<Triple<String, String, Long>>()
+            ctx.contentResolver.query(DocumentsContract.buildChildDocumentsUriUsingTree(tree, id), PROJECTION, null, null, null)?.use { c ->
+                while (c.moveToNext()) {
+                    val name = c.getString(1) ?: continue
+                    val mime = c.getString(2) ?: ""
+                    if (mime == DocumentsContract.Document.MIME_TYPE_DIR) ids[if (rel.isEmpty()) name else "$rel/$name"] = c.getString(0)
+                    out += Triple(name, mime, if (c.isNull(3)) 0L else c.getLong(3))
+                }
+            }
+            return out
+        }
+
+        override fun listDirs(rel: String) = children(rel).filter { it.second == DocumentsContract.Document.MIME_TYPE_DIR }.map { it.first }
+        override fun listFiles(rel: String) = children(rel).filter { it.second != DocumentsContract.Document.MIME_TYPE_DIR }.associate { it.first to it.third }
+
+        private fun dirId(rel: String): String {
+            ids[rel]?.let { return it }
+            val parent = dirname(rel)
+            val pid = dirId(parent)
+            listDirs(parent)
+            ids[rel]?.let { return it }
+            val doc = DocumentsContract.createDocument(ctx.contentResolver, DocumentsContract.buildDocumentUriUsingTree(tree, pid),
+                DocumentsContract.Document.MIME_TYPE_DIR, basename(rel)) ?: throw IOException("Impossibile creare la cartella $rel")
+            return DocumentsContract.getDocumentId(doc).also { ids[rel] = it }
+        }
+
+        /** Crea il file e lo riempie; l'URI è nella forma che usa la scansione della cartella. */
+        override fun put(relFile: String, write: (OutputStream) -> Unit): ICloudSync.Written {
+            val doc = createInTree(ctx, tree, dirId(dirname(relFile)), basename(relFile), write)
+            val uri = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getDocumentId(doc))
+            var size = 0L
+            var mtime = System.currentTimeMillis() / 1000.0
+            try {
+                ctx.contentResolver.query(uri, arrayOf(DocumentsContract.Document.COLUMN_SIZE, DocumentsContract.Document.COLUMN_LAST_MODIFIED),
+                    null, null, null)?.use { c ->
+                    if (c.moveToFirst()) {
+                        if (!c.isNull(0)) size = c.getLong(0)
+                        if (!c.isNull(1)) mtime = c.getLong(1) / 1000.0
+                    }
+                }
+            } catch (e: Exception) {
+                // alcuni fornitori non danno subito i dati del file appena scritto
+            }
+            return ICloudSync.Written(uri.toString(), size, mtime)
+        }
     }
 }

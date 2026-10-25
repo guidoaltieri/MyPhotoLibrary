@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Animation
+import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.BurstMode
 import androidx.compose.material.icons.filled.CameraFront
@@ -156,6 +157,11 @@ fun CollectionsTab() {
         item { row("hidden")() }
         item { row("deleted")() }
         item { SectionTitle("Sorgenti") { TextButton(onClick = { nav.go(Screen.Sources) }) { Text("Gestisci") } } }
+        item {
+            ListItem(headlineContent = { Text("iCloud Foto") }, supportingContent = { Text("Copia le foto di iCloud su un cloud collegato") },
+                leadingContent = { Icon(Icons.Filled.Cloud, null, tint = MaterialTheme.colorScheme.primary) },
+                modifier = Modifier.clickable { nav.go(Screen.ICloud) })
+        }
         d.sources.forEach { s ->
             item(key = "s${s.id}") {
                 ListItem(headlineContent = { Text(s.name) },
