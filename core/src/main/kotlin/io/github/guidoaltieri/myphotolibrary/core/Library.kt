@@ -751,13 +751,16 @@ class Library(val db: Db) {
      * (cartella vuota ma fototeca piena; metà dei file spariti in una volta sola).
      * Restituisce (rimossi, messaggio o null).
      */
-    fun finishScan(sourceId: Long, token: String, totalKnown: Int, remote: Boolean): Pair<Int, String?> = db.transaction {
+    fun finishScan(sourceId: Long, token: String, totalKnown: Int, remote: Boolean, complete: Boolean = true): Pair<Int, String?> = db.transaction {
         val src = source(sourceId)
         val gone = db.query("SELECT path FROM media WHERE source_id=? AND COALESCE(scan_seen, '') != ?", listOf(sourceId, token)).map { it.str("path")!! }
         val seenNow = db.scalarLong("SELECT COUNT(*) FROM media WHERE source_id=? AND scan_seen=?", listOf(sourceId, token))
         var msg: String? = null
         var toRemove = gone
-        if (seenNow == 0L && totalKnown > 0) {
+        if (!complete) {
+            // alcune cartelle non hanno risposto: i loro file non sono spariti, solo non letti
+            toRemove = emptyList()
+        } else if (seenNow == 0L && totalKnown > 0) {
             msg = "${src?.name}: nessun file trovato, la fototeca non viene modificata"
             toRemove = emptyList()
         } else if (remote && gone.size > maxOf(50.0, totalKnown * 0.5) && src?.pendingGone != gone.size) {

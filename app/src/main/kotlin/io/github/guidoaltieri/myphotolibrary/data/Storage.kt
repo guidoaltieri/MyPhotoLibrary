@@ -2,6 +2,8 @@ package io.github.guidoaltieri.myphotolibrary.data
 
 import android.content.ContentValues
 import android.content.Context
+import android.database.ContentObserver
+import android.database.Cursor
 import android.net.Uri
 import android.provider.DocumentsContract
 import android.provider.MediaStore
@@ -11,6 +13,8 @@ import io.github.guidoaltieri.myphotolibrary.core.basename
 import io.github.guidoaltieri.myphotolibrary.core.dirname
 import java.io.IOException
 import java.io.OutputStream
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 /** Accesso ai file condiviso da scansione, importazione ed esportazione. */
 object Storage {
@@ -21,23 +25,91 @@ object Storage {
     private val PROJECTION = arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME,
         DocumentsContract.Document.COLUMN_MIME_TYPE, DocumentsContract.Document.COLUMN_SIZE, DocumentsContract.Document.COLUMN_LAST_MODIFIED)
 
+    /** Esito della lettura di una cartella: [error] se la cartella principale non risponde. */
+    class Listing(val files: List<DocFile>, val failedDirs: Int, val error: String?) {
+        val reachable get() = error == null
+        /** tutte le sottocartelle hanno risposto: solo allora si possono togliere i file spariti */
+        val complete get() = reachable && failedDirs == 0
+    }
+
+    private class ChildQuery(val cursor: Cursor?, val error: String?)
+
+    /**
+     * Elenco dei figli di un documento, tollerante con le app cloud:
+     * - se l'app non risponde (processo appena avviato, accesso al servizio in corso) si riprova
+     *   con attese crescenti invece di dichiarare subito la cartella non raggiungibile;
+     * - se l'app risponde «sto ancora caricando» (EXTRA_LOADING) si aspetta che finisca e si
+     *   rilegge, invece di prendere un elenco vuoto o parziale.
+     */
+    private fun queryChildren(ctx: Context, uri: Uri, cancelled: () -> Boolean): ChildQuery {
+        var lastError: String? = null
+        for (wait in RETRY_MS) {
+            if (cancelled()) break
+            if (wait > 0) Thread.sleep(wait)
+            var c: Cursor? = try {
+                ctx.contentResolver.query(uri, PROJECTION, null, null, null)
+            } catch (e: SecurityException) {
+                return ChildQuery(null, "permesso sulla cartella scaduto: ricollegala da Sorgenti")
+            } catch (e: Exception) {
+                lastError = e.message ?: e.javaClass.simpleName
+                null
+            }
+            var rounds = 0
+            while (c != null && c.extras.getBoolean(DocumentsContract.EXTRA_LOADING) && rounds < LOADING_ROUNDS && !cancelled()) {
+                waitForChange(c)
+                c.close()
+                c = try { ctx.contentResolver.query(uri, PROJECTION, null, null, null) } catch (e: Exception) { null }
+                rounds++
+            }
+            if (c != null) {
+                c.extras.getString(DocumentsContract.EXTRA_ERROR)?.let { if (c.count == 0) lastError = it }
+                if (c.count > 0 || c.extras.getString(DocumentsContract.EXTRA_ERROR) == null) return ChildQuery(c, null)
+                c.close()
+            }
+        }
+        return ChildQuery(null, lastError ?: "l'app della cartella non risponde")
+    }
+
+    /** Aspetta che l'app avvisi di aver finito di caricare (al massimo [LOADING_WAIT_MS]). */
+    private fun waitForChange(c: Cursor) {
+        val latch = CountDownLatch(1)
+        val obs = object : ContentObserver(null) {
+            override fun onChange(selfChange: Boolean) = latch.countDown()
+        }
+        c.registerContentObserver(obs)
+        try {
+            latch.await(LOADING_WAIT_MS, TimeUnit.MILLISECONDS)
+        } finally {
+            c.unregisterContentObserver(obs)
+        }
+    }
+
+    /** attese prima di ogni tentativo (circa 30 secondi in tutto) */
+    private val RETRY_MS = longArrayOf(0, 1000, 2000, 4000, 8000, 15000)
+    private const val LOADING_ROUNDS = 6
+    private const val LOADING_WAIT_MS = 20_000L
+
+    fun hasPermission(ctx: Context, tree: Uri) = ctx.contentResolver.persistedUriPermissions.any { it.uri == tree && it.isReadPermission }
+
     /**
      * Foto e video di una cartella e delle sue sottocartelle (nascoste e di sistema escluse).
-     * null se la cartella non è leggibile (scheda tolta, permesso revocato).
+     * Le sottocartelle che non rispondono vengono contate: la lettura è allora incompleta.
      */
-    fun walkTree(ctx: Context, tree: Uri, cancelled: () -> Boolean = { false }): List<DocFile>? {
-        val rootId = try { DocumentsContract.getTreeDocumentId(tree) } catch (e: Exception) { return null }
+    fun walkTree(ctx: Context, tree: Uri, cancelled: () -> Boolean = { false }): Listing {
+        if (!hasPermission(ctx, tree)) return Listing(emptyList(), 0, "permesso sulla cartella mancante: ricollegala da Sorgenti")
+        val rootId = try { DocumentsContract.getTreeDocumentId(tree) } catch (e: Exception) { return Listing(emptyList(), 0, "indirizzo della cartella non valido") }
         val out = ArrayList<DocFile>()
         val queue = ArrayDeque(listOf(rootId to ""))
-        var readable = false
+        var failed = 0
         while (queue.isNotEmpty() && !cancelled()) {
             val (docId, rel) = queue.removeFirst()
-            val c = try {
-                ctx.contentResolver.query(DocumentsContract.buildChildDocumentsUriUsingTree(tree, docId), PROJECTION, null, null, null)
-            } catch (e: Exception) {
-                null
-            } ?: continue
-            readable = true
+            val q = queryChildren(ctx, DocumentsContract.buildChildDocumentsUriUsingTree(tree, docId), cancelled)
+            val c = q.cursor
+            if (c == null) {
+                if (rel.isEmpty()) return Listing(emptyList(), 0, q.error)
+                failed++
+                continue
+            }
             c.use {
                 while (it.moveToNext()) {
                     val id = it.getString(0) ?: continue
@@ -54,7 +126,7 @@ object Storage {
                 }
             }
         }
-        return if (readable) out else null
+        return Listing(out, failed + queue.size, null)   // interrotta: le cartelle in coda non sono state lette
     }
 
     /** Nuovo file nella memoria del telefono ([relativeDir], es. «Pictures/MyPhotoLibrary/2024/05»). */
@@ -105,7 +177,8 @@ object Storage {
         private fun children(rel: String): List<Triple<String, String, Long>> {   // (nome, mime, dimensione)
             val id = ids[rel] ?: return emptyList()
             val out = mutableListOf<Triple<String, String, Long>>()
-            ctx.contentResolver.query(DocumentsContract.buildChildDocumentsUriUsingTree(tree, id), PROJECTION, null, null, null)?.use { c ->
+            val q = queryChildren(ctx, DocumentsContract.buildChildDocumentsUriUsingTree(tree, id)) { false }
+            (q.cursor ?: throw IOException("Cartella non leggibile: ${q.error}")).use { c ->
                 while (c.moveToNext()) {
                     val name = c.getString(1) ?: continue
                     val mime = c.getString(2) ?: ""

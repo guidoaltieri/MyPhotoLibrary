@@ -90,6 +90,21 @@ class UpdatesTest {
         assertEquals(1, lib.media("library", Search.compile("file:img_1499")).size)
     }
 
+    @Test
+    fun incompleteScanNeverRemovesPhotos() {
+        val lib = Library(JdbcDb())
+        val sid = lib.addSource("folder", "Cloud", "content://tree/Cloud")
+        for (i in 0 until 10) lib.upsert(sid, "content://c/$i", "a$i.jpg", "Viaggi/a$i.jpg",
+            MediaMeta(taken = ts(2023, 1, 1)).apply { finish("a$i.jpg", i.toLong(), 1.0) }, "t1")
+        // nuova scansione: la sottocartella «Viaggi» non ha risposto, nessun file visto
+        val (removed, _) = lib.finishScan(sid, "t2", 10, remote = true, complete = false)
+        assertEquals(0, removed)
+        assertEquals(10, lib.count("library").first)
+        // scansione completa con 3 file davvero spariti (meno della metà): vengono tolti
+        lib.markSeen((0 until 7).map { "content://c/$it" }, "t3")
+        assertEquals(3, lib.finishScan(sid, "t3", 10, remote = true).first)
+    }
+
     private fun jpeg(w: Int, h: Int, pad: Int): ByteArray {
         // JPEG minimale: SOI, SOF0 con le dimensioni, poi byte di riempimento
         val sof = byteArrayOf(0xFF.toByte(), 0xC0.toByte(), 0, 17, 8, (h shr 8).toByte(), h.toByte(), (w shr 8).toByte(), w.toByte(), 3) + ByteArray(9)

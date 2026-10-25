@@ -27,7 +27,9 @@ class Importer(private val ctx: Context, private val reader: MetaReader) {
 
     /** File multimediali in una cartella (ricorsivo). */
     suspend fun list(tree: Uri, known: (String, Long) -> Boolean): List<Candidate> = withContext(Dispatchers.IO) {
-        val files = Storage.walkTree(ctx, tree, cancelled = { !isActive }) ?: throw java.io.IOException("Cartella non leggibile")
+        val listing = Storage.walkTree(ctx, tree, cancelled = { !isActive })
+        if (!listing.reachable) throw java.io.IOException("Cartella non leggibile: ${listing.error}")
+        val files = listing.files
         files.map { Candidate(it.uri, it.name, it.relpath, it.size, it.mtime, known(it.name, it.size)) }.sortedBy { it.relpath }
     }
 

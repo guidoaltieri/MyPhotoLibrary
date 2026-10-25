@@ -12,6 +12,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
@@ -37,17 +38,20 @@ class Scanner(private val ctx: Context, private val lib: Library, private val re
         val messages = mutableListOf<String>()
         for (src in sources.filter { it.enabled }) {
             ensureActive()
+            var complete = true
             val entries = try {
-                when (src.kind) {
-                    "device" -> listMediaStore()
-                    else -> Storage.walkTree(ctx, Uri.parse(src.path))?.map { Entry(it.uri, it.name, it.relpath, it.size, it.mtime, null) }
+                if (src.kind == "device") listMediaStore() else {
+                    val listing = Storage.walkTree(ctx, Uri.parse(src.path)) { !isActive }
+                    if (!listing.reachable) {
+                        messages += "${src.name}: cartella non raggiungibile (${listing.error}). La fototeca non viene modificata."
+                        continue
+                    }
+                    complete = listing.complete
+                    if (!complete) messages += "${src.name}: ${listing.failedDirs} cartelle non hanno risposto; le foto lette sono state aggiornate, nessuna è stata tolta."
+                    listing.files.map { Entry(it.uri, it.name, it.relpath, it.size, it.mtime, null) }
                 }
             } catch (e: Exception) {
-                messages += "Sorgente non raggiungibile: ${src.name} (${e.message ?: e.javaClass.simpleName})"
-                continue
-            }
-            if (entries == null) {
-                messages += "Sorgente non raggiungibile: ${src.name}"
+                messages += "${src.name}: lettura non riuscita (${e.message ?: e.javaClass.simpleName}). La fototeca non viene modificata."
                 continue
             }
             val token = "%.6f".format(java.util.Locale.ROOT, Library.now())
@@ -84,7 +88,7 @@ class Scanner(private val ctx: Context, private val lib: Library, private val re
                     committed()     // le foto lette compaiono nella libreria man mano
                 }
             }
-            val (r, msg) = lib.finishScan(src.id, token, known.size, src.kind != "device")
+            val (r, msg) = lib.finishScan(src.id, token, known.size, src.kind != "device", complete)
             removed += r
             msg?.let { messages += it }
             committed()
