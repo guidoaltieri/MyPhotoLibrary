@@ -3,6 +3,7 @@ package io.github.guidoaltieri.myphotolibrary.data
 import android.content.Context
 import android.net.Uri
 import android.os.Environment
+import android.provider.DocumentsContract
 import android.provider.MediaStore
 import io.github.guidoaltieri.myphotolibrary.core.Fmt
 import io.github.guidoaltieri.myphotolibrary.core.ImportTarget
