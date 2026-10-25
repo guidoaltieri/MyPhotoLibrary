@@ -20,6 +20,7 @@ import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import io.github.guidoaltieri.myphotolibrary.App
 import io.github.guidoaltieri.myphotolibrary.core.Fmt
+import io.github.guidoaltieri.myphotolibrary.core.HttpTransport
 import io.github.guidoaltieri.myphotolibrary.core.ICloudError
 import io.github.guidoaltieri.myphotolibrary.core.ICloudNeedsCode
 import io.github.guidoaltieri.myphotolibrary.core.ICloudPhotos
@@ -96,9 +97,16 @@ class ICloudManager(private val ctx: Context, private val repo: Repo) {
     var appleId: String
         get() = prefs.getString("apple_id", "") ?: ""
         private set(v) = prefs.edit().putString("apple_id", v).apply()
+    /** cartella di destinazione e copia automatica, osservabili dall'interfaccia */
+    val destination = MutableStateFlow(prefs.getLong("dest", -1))
+    val autoCopy = MutableStateFlow(prefs.getBoolean("enabled", false))
+
     var destSource: Long
-        get() = prefs.getLong("dest", -1)
-        set(v) = prefs.edit().putLong("dest", v).apply()
+        get() = destination.value
+        set(v) {
+            destination.value = v
+            prefs.edit().putLong("dest", v).apply()
+        }
     var layout: String
         get() = prefs.getString("layout", Layouts.DEFAULT) ?: Layouts.DEFAULT
         set(v) = prefs.edit().putString("layout", v).apply()
@@ -106,8 +114,11 @@ class ICloudManager(private val ctx: Context, private val repo: Repo) {
         get() = prefs.getBoolean("use_existing", true)
         set(v) = prefs.edit().putBoolean("use_existing", v).apply()
     var enabled: Boolean
-        get() = prefs.getBoolean("enabled", false)
-        set(v) = prefs.edit().putBoolean("enabled", v).apply()
+        get() = autoCopy.value
+        set(v) {
+            autoCopy.value = v
+            prefs.edit().putBoolean("enabled", v).apply()
+        }
     /** la prima copia completa è finita: da qui in poi si cercano solo le foto nuove */
     var fullDone: Boolean
         get() = prefs.getBoolean("full_done", false)
@@ -123,13 +134,38 @@ class ICloudManager(private val ctx: Context, private val repo: Repo) {
     fun setStatus(text: String) {
         status.value = text
         prefs.edit().putString("status", text).apply()
+        log(text)
+    }
+
+    /** Registro per capire cosa succede in background (mai password né contenuti delle risposte). */
+    val logFile = File(ctx.filesDir, "icloud.log")
+
+    @Synchronized
+    fun log(text: String) {
+        try {
+            if (logFile.length() > 256 * 1024) logFile.writeText(logFile.readText().takeLast(128 * 1024))
+            val time = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.ROOT).format(java.util.Date())
+            logFile.appendText("$time  $text\n")
+        } catch (e: Exception) {
+        }
+    }
+
+    /** Le richieste ad Apple finiscono nel registro: metodo, indirizzo senza parametri, esito. */
+    private val transport = HttpTransport { r ->
+        val where = r.url.substringBefore('?')
+        try {
+            HttpTransport.DEFAULT.execute(r).also { log("${r.method} $where → ${it.status}") }
+        } catch (e: Exception) {
+            log("${r.method} $where → ${e.javaClass.simpleName}: ${e.message}")
+            throw e
+        }
     }
 
     val signedIn: Boolean get() = appleId.isNotEmpty() && secrets.password != null && !needsLogin
     val configured: Boolean get() = signedIn && destSource > 0 && repo.lib.source(destSource) != null
 
     private fun sessionFor(id: String): ICloudSession =
-        session?.takeIf { it.appleId == id } ?: ICloudSession(id, FileStore(File(ctx.filesDir, "icloud/session.json"))).also { session = it }
+        session?.takeIf { it.appleId == id } ?: ICloudSession(id, FileStore(File(ctx.filesDir, "icloud/session.json")), transport).also { session = it }
 
     sealed interface Login {
         data object Ok : Login
@@ -148,19 +184,23 @@ class ICloudManager(private val ctx: Context, private val repo: Repo) {
             }
             appleId = id.trim()
             secrets.password = password
+            log("Accesso con ${appleId.replace(Regex("(?<=.).(?=[^@]*@)"), "*")}")
             val s = sessionFor(appleId)
             s.signIn(password)
             s.accountLogin()
             if (s.requires2fa) {
                 s.requestCode()
+                log("Richiesto il codice di verifica")
                 Login.NeedsCode
             } else {
                 needsLogin = false
                 Login.Ok
             }
         } catch (e: ICloudError) {
+            log("Accesso non riuscito: ${e.message} (${e.code} ${e.status})")
             Login.Failed(e.message ?: "Accesso non riuscito")
         } catch (e: Exception) {
+            log("Accesso non riuscito: $e")
             Login.Failed("Accesso non riuscito: ${e.message ?: e.javaClass.simpleName}")
         }
     }
@@ -175,6 +215,7 @@ class ICloudManager(private val ctx: Context, private val repo: Repo) {
                 Login.Ok
             } else Login.Failed("Codice non corretto")
         } catch (e: Exception) {
+            log("Verifica del codice non riuscita: $e")
             Login.Failed(e.message ?: "Verifica non riuscita")
         }
     }
@@ -189,6 +230,9 @@ class ICloudManager(private val ctx: Context, private val repo: Repo) {
         repo.lib.clearIcloudSynced()
         prefs.edit().clear().apply()
         status.value = ""
+        destination.value = -1
+        autoCopy.value = false
+        logFile.delete()
     }
 
     // --- copia in background --------------------------------------------------------------------
@@ -201,6 +245,7 @@ class ICloudManager(private val ctx: Context, private val repo: Repo) {
     /** Avvia (o lascia proseguire) la copia: alla configurazione e a ogni apertura dell'app. */
     fun schedule(replace: Boolean = false) {
         if (!enabled || !configured) return
+        log(if (replace) "Copia avviata a mano" else "Controllo delle foto nuove all'apertura")
         val req = OneTimeWorkRequestBuilder<ICloudWorker>()
             .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
             .build()
@@ -214,6 +259,7 @@ class ICloudManager(private val ctx: Context, private val repo: Repo) {
     /** Il lavoro vero, chiamato dal worker. False: si ferma finché l'utente non interviene (accesso, destinazione). */
     suspend fun sync(cancelled: () -> Boolean, progress: suspend (String) -> Unit): Boolean = withContext(Dispatchers.IO) {
         val src = repo.lib.source(destSource) ?: run { setStatus("La cartella di destinazione non esiste più"); return@withContext false }
+        setStatus("Accesso a iCloud…")
         val s = sessionFor(appleId)
         try {
             s.authenticate { secrets.password }
@@ -232,7 +278,8 @@ class ICloudManager(private val ctx: Context, private val repo: Repo) {
             setStatus("Apple sta ancora preparando la fototeca iCloud: riprova più tardi")
             return@withContext true
         }
-        val total = try { photos.count() } catch (e: Exception) { 0 }
+        val total = try { photos.count() } catch (e: Exception) { log("Conteggio non riuscito: $e"); 0 }
+        setStatus("Fototeca iCloud: ${Fmt.thousands(total.toLong())} elementi. Copia verso ${src.name}…")
         val remote = object : ICloudSync.Remote {
             override fun page(offset: Int) = photos.page(offset)
             override fun open(url: String) = photos.open(url)
@@ -252,6 +299,7 @@ class ICloudManager(private val ctx: Context, private val repo: Repo) {
         }
         repo.task.value = null
         repo.changed()
+        result.messages.forEach { log("Errore: $it") }
         if (result.complete) {
             fullDone = true
             lastSync = System.currentTimeMillis()
@@ -307,6 +355,7 @@ class ICloudWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
             }
             if (ok) Result.success() else Result.failure()
         } catch (e: Exception) {
+            icloud.log(e.stackTraceToString().take(2000))
             icloud.setStatus("Copia interrotta: ${e.message ?: e.javaClass.simpleName}. Riprenderà da qui.")
             Result.retry()
         } finally {

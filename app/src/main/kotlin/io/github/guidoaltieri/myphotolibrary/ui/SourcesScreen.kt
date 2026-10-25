@@ -46,8 +46,11 @@ import io.github.guidoaltieri.myphotolibrary.core.Fmt
 import io.github.guidoaltieri.myphotolibrary.core.Source
 import io.github.guidoaltieri.myphotolibrary.core.basename
 
-/** Nome leggibile della cartella scelta con il selettore di sistema. */
-fun treeName(uri: Uri): String = try {
+/** Nome della cartella: quello mostrato dall'app che la fornisce, altrimenti ricavato dall'indirizzo. */
+fun treeName(ctx: android.content.Context, uri: Uri): String = io.github.guidoaltieri.myphotolibrary.data.Storage.displayName(ctx, uri) ?: treeIdName(uri)
+
+/** Nome ricavato dall'identificativo della cartella (per alcune app è un codice, non il nome). */
+fun treeIdName(uri: Uri): String = try {
     val id = DocumentsContract.getTreeDocumentId(uri)
     basename(id.substringAfter(":")).ifEmpty { id.substringBefore(":").ifEmpty { "Cartella" } }
 } catch (e: Exception) {
@@ -76,7 +79,7 @@ fun SourcesScreen() {
                 try { ctx.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (e2: Exception) {}
             }
             repo.io {
-                val id = repo.lib.addSource("folder", treeName(uri), uri.toString(), uri.authority ?: "")
+                val id = repo.lib.addSource("folder", treeName(ctx, uri), uri.toString(), uri.authority ?: "")
                 repo.scan(listOf(id))
             }
         }

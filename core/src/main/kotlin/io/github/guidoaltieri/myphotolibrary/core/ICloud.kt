@@ -58,6 +58,8 @@ fun interface HttpTransport {
             c.useCaches = false
             r.headers.forEach { (k, v) -> c.setRequestProperty(k, v) }
             if (r.body != null) {
+                // senza tipo HttpURLConnection invierebbe «application/x-www-form-urlencoded»
+                if (r.headers.keys.none { it.equals("Content-Type", true) }) c.setRequestProperty("Content-Type", "text/plain;charset=UTF-8")
                 c.doOutput = true
                 c.outputStream.use { it.write(r.body.toByteArray(Charsets.UTF_8)) }
             }

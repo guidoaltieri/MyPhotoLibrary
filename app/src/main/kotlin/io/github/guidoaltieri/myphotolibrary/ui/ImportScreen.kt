@@ -115,8 +115,7 @@ fun ImportScreen() {
                 val r = repo.importer.transfer(list, target, layout, useExisting, deleteAfter) { p -> running = p }
                 result = r
                 if (r.copied.isNotEmpty()) {
-                    val origin = treeName(source!!)
-                    val importId = withContext(Dispatchers.IO) { repo.lib.newImport(origin) }
+                    val importId = withContext(Dispatchers.IO) { repo.lib.newImport(treeName(ctx, source!!)) }
                     val paths = r.copied.map { it.toString() }
                     val srcIds = withContext(Dispatchers.IO) {
                         repo.lib.sources().filter { s -> if (dest == null) s.kind == "device" else s.path == dest.toString() }.map { it.id }
@@ -166,16 +165,18 @@ fun ImportScreen() {
                     }
                 }
                 2 -> Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val d0 = dest
+                    val destName = load(d0, initial = "…") { d0?.let { treeName(ctx, it) } ?: "" }
                     Text("Destinazione", style = MaterialTheme.typography.titleMedium)
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { dest = null }) {
                         RadioButton(dest == null, { dest = null }); Text("Questo telefono (Immagini/MyPhotoLibrary)")
                     }
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { pickDest.launch(null) }) {
                         RadioButton(dest != null, { pickDest.launch(null) })
-                        Text(if (dest != null) "Cartella: ${treeName(dest!!)}" else "Un'altra cartella (anche di un'app cloud)…")
+                        Text(if (dest != null) "Cartella: $destName" else "Un'altra cartella (anche di un'app cloud)…")
                     }
                     FolderLayoutPicker(layout, { layout = it }, useExisting, { useExisting = it },
-                        if (dest == null) "Immagini/MyPhotoLibrary" else treeName(dest!!))
+                        if (dest == null) "Immagini/MyPhotoLibrary" else destName)
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(deleteAfter, { deleteAfter = it })
                         Text("Elimina gli originali dopo l'importazione")
@@ -200,7 +201,7 @@ fun ImportScreen() {
                         if (d != null) {
                             val inLib = load(d, initial = true) { repo.lib.sources().any { it.path == d.toString() } }
                             if (!inLib) OutlinedButton(onClick = {
-                                repo.io { val id = repo.lib.addSource("folder", treeName(d), d.toString(), d.authority ?: ""); repo.scan(listOf(id)) }
+                                repo.io { val id = repo.lib.addSource("folder", treeName(ctx, d), d.toString(), d.authority ?: ""); repo.scan(listOf(id)) }
                             }) { Text("Aggiungi la cartella alla fototeca") }
                         }
                         Button(onClick = { nav.back() }) { Text("Fine") }

@@ -49,7 +49,8 @@ object Storage {
             var c: Cursor? = try {
                 ctx.contentResolver.query(uri, PROJECTION, null, null, null)
             } catch (e: SecurityException) {
-                return ChildQuery(null, "permesso sulla cartella scaduto: ricollegala da Sorgenti")
+                // solo un rifiuto vero di Android: il permesso salvato non c'è più
+                return ChildQuery(null, "Android non concede più l'accesso alla cartella: ricollegala da Sorgenti")
             } catch (e: Exception) {
                 lastError = e.message ?: e.javaClass.simpleName
                 null
@@ -89,14 +90,21 @@ object Storage {
     private const val LOADING_ROUNDS = 6
     private const val LOADING_WAIT_MS = 20_000L
 
-    fun hasPermission(ctx: Context, tree: Uri) = ctx.contentResolver.persistedUriPermissions.any { it.uri == tree && it.isReadPermission }
+    /** Nome della cartella come lo mostra l'app che la fornisce (non l'identificativo interno). */
+    fun displayName(ctx: Context, tree: Uri): String? = try {
+        val doc = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
+        ctx.contentResolver.query(doc, arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME), null, null, null)?.use {
+            if (it.moveToFirst()) it.getString(0)?.takeIf { n -> n.isNotBlank() } else null
+        }
+    } catch (e: Exception) {
+        null
+    }
 
     /**
      * Foto e video di una cartella e delle sue sottocartelle (nascoste e di sistema escluse).
      * Le sottocartelle che non rispondono vengono contate: la lettura è allora incompleta.
      */
     fun walkTree(ctx: Context, tree: Uri, cancelled: () -> Boolean = { false }): Listing {
-        if (!hasPermission(ctx, tree)) return Listing(emptyList(), 0, "permesso sulla cartella mancante: ricollegala da Sorgenti")
         val rootId = try { DocumentsContract.getTreeDocumentId(tree) } catch (e: Exception) { return Listing(emptyList(), 0, "indirizzo della cartella non valido") }
         val out = ArrayList<DocFile>()
         val queue = ArrayDeque(listOf(rootId to ""))

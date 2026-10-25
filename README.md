@@ -57,6 +57,8 @@ collegato all'app, organizzata per data, e la tiene aggiornata:
    file temporanei sul telefono, e compare subito nella libreria con data, dimensioni, posizione e preferito di iCloud;
    le Live Photo arrivano con il loro video. A ogni apertura dell'app si copiano solo le foto nuove (la lettura
    dell'elenco si ferma appena trova solo foto già copiate); una copia interrotta riprende da dove era arrivata.
+   La copia parte appena si sceglie la cartella; la scheda mostra lo stato del lavoro in background e
+   **Condividi il registro** invia il registro di accesso e copia (senza password né dati delle foto) se qualcosa non va.
 
 Lo spazio usato sul telefono dipende anche dall'app del cloud: alcune tengono una copia locale dei file finché non li
 hanno caricati. Album condivisi e libreria condivisa di iCloud non sono inclusi. Il protocollo è quello di
