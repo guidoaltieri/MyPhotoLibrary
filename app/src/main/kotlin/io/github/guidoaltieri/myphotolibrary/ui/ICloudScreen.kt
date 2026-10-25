@@ -210,19 +210,26 @@ private fun SyncCard(ic: ICloudManager) {
 private fun DestinationCard(ic: ICloudManager) {
     val repo = repo()
     val ctx = LocalContext.current
-    val folders = load(initial = emptyList<Source>()) { repo.lib.sources().filter { it.kind == "folder" && it.enabled } }
+    val folders = load(initial = emptyList<Source>()) {
+        repo.lib.sources().filter { it.kind == "folder" && it.enabled }.map { s ->
+            // cartelle collegate con un codice al posto del nome: si mostra quello vero (o il nome dell'app)
+            if (!isCodeName(s.name)) s
+            else treeName(ctx, android.net.Uri.parse(s.path)).let { n -> if (n == s.name) s else { repo.lib.renameSource(s.id, n); s.copy(name = n) } }
+        }
+    }
     var dest by remember { mutableLongStateOf(ic.destSource) }
     var layout by remember { mutableStateOf(ic.layout) }
     var useExisting by remember { mutableStateOf(ic.useExisting) }
     fun choose(id: Long) {
-        if (id != ic.destSource) {
+        val changed = id != ic.destSource
+        if (changed) {
             // nuova destinazione: le foto vanno copiate anche lì
             repo.lib.clearIcloudSynced(); ic.fullDone = false
         }
         ic.destSource = id; dest = id
         // scelta la cartella, la copia parte subito (si può sempre fermare con l'interruttore)
         ic.enabled = true
-        ic.schedule(replace = true)
+        if (changed) ic.restart() else ic.schedule()
     }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) {

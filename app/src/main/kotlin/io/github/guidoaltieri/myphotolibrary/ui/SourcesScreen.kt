@@ -46,8 +46,24 @@ import io.github.guidoaltieri.myphotolibrary.core.Fmt
 import io.github.guidoaltieri.myphotolibrary.core.Source
 import io.github.guidoaltieri.myphotolibrary.core.basename
 
-/** Nome della cartella: quello mostrato dall'app che la fornisce, altrimenti ricavato dall'indirizzo. */
-fun treeName(ctx: android.content.Context, uri: Uri): String = io.github.guidoaltieri.myphotolibrary.data.Storage.displayName(ctx, uri) ?: treeIdName(uri)
+/**
+ * Nome della cartella: quello mostrato dall'app che la fornisce, altrimenti ricavato dall'indirizzo.
+ * Se è solo un codice (alcune app cloud danno alla cartella principale un identificativo), si usa il
+ * nome dell'app («Proton Drive»).
+ */
+fun treeName(ctx: android.content.Context, uri: Uri): String {
+    val name = io.github.guidoaltieri.myphotolibrary.data.Storage.displayName(ctx, uri) ?: treeIdName(uri)
+    if (!isCodeName(name)) return name
+    return try {
+        val pm = ctx.packageManager
+        pm.resolveContentProvider(uri.authority ?: "", 0)?.loadLabel(pm)?.toString()?.takeIf { it.isNotBlank() }
+    } catch (e: Exception) {
+        null
+    } ?: name
+}
+
+/** Un nome che è in realtà un codice (es. 01a0d02f-eb27-77fc-8ee0-f8ddbef797f9). */
+fun isCodeName(name: String): Boolean = name.length >= 16 && name.all { it.isDigit() || it in 'a'..'f' || it in 'A'..'F' || it == '-' }
 
 /** Nome ricavato dall'identificativo della cartella (per alcune app è un codice, non il nome). */
 fun treeIdName(uri: Uri): String = try {

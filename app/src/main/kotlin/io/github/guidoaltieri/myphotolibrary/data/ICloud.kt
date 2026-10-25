@@ -93,6 +93,12 @@ class ICloudManager(private val ctx: Context, private val repo: Repo) {
     /** Stato mostrato nell'interfaccia (ultimo esito, errore, avanzamento). */
     val status = MutableStateFlow(prefs.getString("status", "") ?: "")
     val running = MutableStateFlow(false)
+    private val active = java.util.concurrent.atomic.AtomicInteger()
+
+    /** Il worker entra o esce: «in corso» finché ne resta almeno uno (uno fermato può finire dopo il nuovo). */
+    fun working(on: Boolean) {
+        running.value = (if (on) active.incrementAndGet() else active.decrementAndGet()) > 0
+    }
 
     var appleId: String
         get() = prefs.getString("apple_id", "") ?: ""
@@ -242,18 +248,38 @@ class ICloudManager(private val ctx: Context, private val repo: Repo) {
         const val NOTIFICATION = 7101
     }
 
-    /** Avvia (o lascia proseguire) la copia: alla configurazione e a ogni apertura dell'app. */
+    /**
+     * Avvia (o lascia proseguire) la copia: alla configurazione e a ogni apertura dell'app. Una copia in
+     * corso non viene mai sostituita (prima ripartiva da capo a ogni tocco); [replace] serve solo a
+     * cambiare destinazione o a non aspettare un nuovo tentativo programmato.
+     */
     fun schedule(replace: Boolean = false) {
         if (!enabled || !configured) return
-        log(if (replace) "Copia avviata a mano" else "Controllo delle foto nuove all'apertura")
+        if (replace && running.value) {
+            log("Copia già in corso: prosegue")
+            return
+        }
+        log(if (replace) "Copia avviata" else "Controllo delle foto nuove all'apertura")
+        enqueue(if (replace) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP)
+    }
+
+    private fun enqueue(policy: ExistingWorkPolicy) {
         val req = OneTimeWorkRequestBuilder<ICloudWorker>()
             .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
             .build()
-        WorkManager.getInstance(ctx).enqueueUniqueWork(WORK, if (replace) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP, req)
+        WorkManager.getInstance(ctx).enqueueUniqueWork(WORK, policy, req)
     }
 
     fun stop() {
         WorkManager.getInstance(ctx).cancelUniqueWork(WORK)
+        if (running.value) setStatus("Copia fermata: riprenderà da dove era arrivata")
+    }
+
+    /** Nuova destinazione: la copia in corso (verso la vecchia) si ferma e si riparte. */
+    fun restart() {
+        if (!enabled || !configured) return
+        log("Nuova destinazione: copia avviata")
+        enqueue(ExistingWorkPolicy.REPLACE)
     }
 
     /** Il lavoro vero, chiamato dal worker. False: si ferma finché l'utente non interviene (accesso, destinazione). */
@@ -300,6 +326,8 @@ class ICloudManager(private val ctx: Context, private val repo: Repo) {
         repo.task.value = null
         repo.changed()
         result.messages.forEach { log("Errore: $it") }
+        log("Fine: copiate ${result.copied}, già presenti ${result.skipped}, errori ${result.errors}, completa ${result.complete}")
+        if (cancelled()) return@withContext true        // fermata o sostituita: lo stato lo scrive chi è subentrato
         if (result.complete) {
             fullDone = true
             lastSync = System.currentTimeMillis()
@@ -347,20 +375,29 @@ class ICloudWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
         } catch (e: Exception) {
             // senza permesso per il servizio in primo piano si continua finché Android lo consente
         }
-        icloud.running.value = true
+        icloud.working(true)
         return try {
             val ok = icloud.sync({ isStopped }) { text ->
-                setProgress(workDataOf("text" to text))
-                try { setForeground(foreground(text)) } catch (e: Exception) {}
+                if (!isStopped) try {
+                    // l'avanzamento è solo informativo: un errore qui non deve fermare la copia
+                    setProgress(workDataOf("text" to text))
+                    setForeground(foreground(text))
+                } catch (e: Exception) {
+                }
             }
             if (ok) Result.success() else Result.failure()
         } catch (e: Exception) {
-            icloud.log(e.stackTraceToString().take(2000))
-            icloud.setStatus("Copia interrotta: ${e.message ?: e.javaClass.simpleName}. Riprenderà da qui.")
-            Result.retry()
+            if (e is kotlinx.coroutines.CancellationException || isStopped) {
+                icloud.log("Copia fermata")
+                Result.retry()
+            } else {
+                icloud.log(e.stackTraceToString().take(2000))
+                icloud.setStatus("Copia interrotta: ${e.message ?: e.javaClass.simpleName}. Riprenderà da qui.")
+                Result.retry()
+            }
         } finally {
-            icloud.running.value = false
-            (applicationContext as App).repo.task.value = null
+            icloud.working(false)
+            if (!icloud.running.value) (applicationContext as App).repo.task.value = null
         }
     }
 }
