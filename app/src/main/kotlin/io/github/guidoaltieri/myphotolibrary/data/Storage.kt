@@ -72,11 +72,36 @@ object Storage {
             }
             if (c != null) {
                 c.extras.getString(DocumentsContract.EXTRA_ERROR)?.let { if (c.count == 0) lastError = it }
-                if (c.count > 0 || c.extras.getString(DocumentsContract.EXTRA_ERROR) == null) return ChildQuery(c, null)
+                if (c.count > 0 || c.extras.getString(DocumentsContract.EXTRA_ERROR) == null)
+                    return ChildQuery(if (uri.authority in LOCAL_PROVIDERS) c else followPages(ctx, c, uri, cancelled, trace), null)
                 c.close()
             }
         }
         return ChildQuery(null, lastError ?: NOT_RESPONDING)
+    }
+
+    /**
+     * App cloud che danno l'elenco a pagine (Proton Drive): la pagina successiva si prepara solo
+     * quando si rilegge la cartella, e l'app avvisa quando è pronta. Si rilegge finché arrivano
+     * avvisi; quando l'app tace per [PAGE_WAIT_MS] e una nuova lettura non porta altro, l'elenco è completo.
+     */
+    private fun followPages(ctx: Context, first: Cursor, uri: Uri, cancelled: () -> Boolean, trace: (String) -> Unit): Cursor {
+        var c = first
+        var pages = 0
+        while (pages < MAX_PAGES && !cancelled()) {
+            val changed = waitForLoad(ctx, c, uri, PAGE_WAIT_MS, PAGE_SETTLE_MS)
+            val next = try { ctx.contentResolver.query(uri, PROJECTION, null, null, null) } catch (e: Exception) { null } ?: break
+            // l'avviso può arrivare prima che ci si metta in ascolto: conta anche un elenco cresciuto
+            if (!changed && next.count <= c.count) {
+                next.close()
+                break
+            }
+            c.close()
+            c = next
+            pages++
+        }
+        if (pages > 0) trace("  ${c.count} elementi dopo $pages nuove letture")
+        return c
     }
 
     /**
@@ -85,7 +110,7 @@ object Storage {
      * rilegge prima della fine, rispondono «finito» con solo una parte dei file: si rilegge quando
      * l'app tace da [SETTLE_MS].
      */
-    private fun waitForLoad(ctx: Context, c: Cursor, uri: Uri): Boolean {
+    private fun waitForLoad(ctx: Context, c: Cursor, uri: Uri, firstWait: Long = LOADING_WAIT_MS, settle: Long = SETTLE_MS): Boolean {
         val events = LinkedBlockingQueue<Unit>()
         val obs = object : ContentObserver(null) {
             override fun onChange(selfChange: Boolean) {
@@ -101,9 +126,9 @@ object Storage {
             null
         }
         try {
-            events.poll(LOADING_WAIT_MS, TimeUnit.MILLISECONDS) ?: return false
+            events.poll(firstWait, TimeUnit.MILLISECONDS) ?: return false
             val end = System.currentTimeMillis() + SETTLE_MAX_MS
-            while (System.currentTimeMillis() < end && events.poll(SETTLE_MS, TimeUnit.MILLISECONDS) != null) events.clear()
+            while (System.currentTimeMillis() < end && events.poll(settle, TimeUnit.MILLISECONDS) != null) events.clear()
             return true
         } finally {
             c.unregisterContentObserver(obs)
@@ -129,6 +154,12 @@ object Storage {
     private const val LOADING_WAIT_MS = 20_000L
     private const val SETTLE_MS = 4_000L
     private const val SETTLE_MAX_MS = 120_000L
+    private const val PAGE_WAIT_MS = 3_000L
+    private const val PAGE_SETTLE_MS = 1_000L
+    private const val MAX_PAGES = 1000
+    /** memoria del telefono, schede SD, download: rispondono subito con tutto l'elenco */
+    private val LOCAL_PROVIDERS = setOf("com.android.externalstorage.documents", "com.android.providers.downloads.documents",
+        "com.android.providers.media.documents")
 
     /** Nome della cartella come lo mostra l'app che la fornisce (non l'identificativo interno). */
     fun displayName(ctx: Context, tree: Uri): String? = try {
