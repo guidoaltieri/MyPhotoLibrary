@@ -35,7 +35,7 @@ Il motore si verifica anche senza SDK: `CORE_ONLY=1 ./gradlew :core:test`.
 | **Modifica data e luogo** (stessa data, «la prima diventa…», sposta), luogo dall'elenco offline o da OpenStreetMap, **Scrivi le modifiche nei file** | Uguale (EXIF di JPEG, PNG, WebP e DNG con ExifInterface) |
 | **Suggerimenti**: date in base alle cartelle (`2024/05`, `Maggio 2024`…) e luoghi dai nomi di cartelle e file (elenco GeoNames offline) | Uguale |
 | **Ricerca** in linguaggio naturale e sintassi avanzata (`camera:`, `year:`, `is:`, `has:`, `place:`, `person:`, `added:<30d`, `OR`, `-`…) | Uguale, con alias italiani |
-| Cloud tramite rclone e iCloud Foto tramite icloudpd | Le **cartelle aggiunte** usano il selettore di Android: schede SD, USB e le app cloud che espongono le cartelle (Proton Drive, Nextcloud, OneDrive…). **iCloud Foto** si copia direttamente su una di queste cartelle (vedi sotto) |
+| Cloud tramite rclone e iCloud Foto tramite icloudpd | Le **cartelle aggiunte** usano il selettore di Android: schede SD, USB e le app cloud che espongono le cartelle (kDrive, Nextcloud, OneDrive…; non Proton Drive, che non permette di scegliere cartelle ad altre app). **iCloud Foto** si copia direttamente su una di queste cartelle (vedi sotto) |
 
 Formati: quelli che Android sa leggere (JPEG, PNG, HEIC/HEIF, AVIF, WebP, GIF, BMP, DNG; gli altri RAW con l'anteprima
 incorporata) e i video MP4, MOV, MKV, WebM, 3GP.
@@ -50,7 +50,7 @@ collegato all'app, organizzata per data, e la tiene aggiornata:
    codice serve di nuovo solo quando Apple lo richiede (in genere ogni uno o due mesi). Servono *Accedi ai dati iCloud
    sul web* attivo e la *Protezione avanzata dei dati* disattivata.
 2. **Destinazione**: una delle cartelle collegate in Sorgenti (app cloud che si vedono nel selettore di sistema:
-   Nextcloud, Proton Drive, OneDrive…), oppure una nuova.
+   kDrive, Nextcloud, OneDrive…), oppure una nuova.
 3. **Organizzazione**: Anno/Mese, Anno/Mese/Giorno, Anno, Anno-Mese, con il nome del mese, nessuna cartella o uno schema
    personalizzato; le cartelle anno/mese già esistenti vengono riconosciute (come in Importa).
 4. **Copia in background** (WorkManager, con notifica): ogni originale passa direttamente da iCloud alla cartella, senza

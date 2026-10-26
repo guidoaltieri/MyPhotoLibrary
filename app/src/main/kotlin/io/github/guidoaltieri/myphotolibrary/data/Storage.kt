@@ -44,7 +44,13 @@ object Storage {
      * - se l'app risponde «sto ancora caricando» (EXTRA_LOADING) si aspetta che finisca e si
      *   rilegge, invece di prendere un elenco vuoto o parziale.
      */
-    private fun queryChildren(ctx: Context, uri: Uri, cancelled: () -> Boolean, trace: (String) -> Unit = {}): ChildQuery {
+    /** Una lettura alla volta per app: kDrive carica una sola cartella e interrompe quella in corso a ogni nuova richiesta. */
+    private val providerLocks = java.util.concurrent.ConcurrentHashMap<String, Any>()
+
+    private fun queryChildren(ctx: Context, uri: Uri, cancelled: () -> Boolean, trace: (String) -> Unit = {}): ChildQuery =
+        synchronized(providerLocks.getOrPut(uri.authority ?: "") { Any() }) { queryChildrenLocked(ctx, uri, cancelled, trace) }
+
+    private fun queryChildrenLocked(ctx: Context, uri: Uri, cancelled: () -> Boolean, trace: (String) -> Unit): ChildQuery {
         var lastError: String? = null
         for (wait in RETRY_MS) {
             if (cancelled()) break

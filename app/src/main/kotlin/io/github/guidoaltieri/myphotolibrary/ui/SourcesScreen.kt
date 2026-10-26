@@ -92,7 +92,7 @@ fun treeIdName(uri: Uri): String = try {
 
 /**
  * Sorgenti: «Questo dispositivo» (tutte le foto di Android) e cartelle aggiunte (schede SD,
- * chiavette USB, app cloud come Drive, Proton Drive, Nextcloud… se mostrano le cartelle nel
+ * chiavette USB, app cloud come kDrive, Nextcloud, OneDrive… se mostrano le cartelle nel
  * selettore di sistema). Scollega, ricollega, rinomina, aggiorna, rimuovi.
  */
 @Composable
@@ -152,7 +152,7 @@ fun SourcesScreen() {
             }
             item {
                 ListItem(headlineContent = { Text("Aggiungi una cartella…") },
-                    supportingContent = { Text("Scheda SD, chiavetta USB o la cartella di un'app cloud (Drive, Proton Drive, Nextcloud…)") },
+                    supportingContent = { Text("Scheda SD, chiavetta USB o la cartella di un'app cloud (kDrive, Nextcloud, OneDrive…)") },
                     leadingContent = { Icon(Icons.Filled.Add, null) }, modifier = Modifier.clickable { picker.launch(null) })
             }
             item {

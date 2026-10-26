@@ -271,7 +271,7 @@ private fun DestinationCard(ic: ICloudManager) {
                     modifier = Modifier.clickable { choose(s.id) })
             }
             ListItem(headlineContent = { Text("Collega un'altra cartella…") },
-                supportingContent = { Text("Nel selettore scegli l'app del cloud (es. Nextcloud, Proton Drive, OneDrive) e la cartella") },
+                supportingContent = { Text("Nel selettore scegli l'app del cloud (es. kDrive, Nextcloud, OneDrive) e la cartella") },
                 leadingContent = { Icon(Icons.Filled.Add, null) }, modifier = Modifier.clickable { picker.launch(null) })
             val destName = folders.firstOrNull { it.id == dest }?.name ?: "Cloud"
             FolderLayoutPicker(layout, { layout = it; if (Layouts.validate(it) == null) ic.layout = it }, useExisting,
