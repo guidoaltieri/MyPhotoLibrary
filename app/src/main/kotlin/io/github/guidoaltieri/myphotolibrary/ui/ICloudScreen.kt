@@ -53,6 +53,7 @@ import io.github.guidoaltieri.myphotolibrary.core.Fmt
 import io.github.guidoaltieri.myphotolibrary.core.Layouts
 import io.github.guidoaltieri.myphotolibrary.core.Source
 import io.github.guidoaltieri.myphotolibrary.data.ICloudManager
+import io.github.guidoaltieri.myphotolibrary.data.Storage
 import kotlinx.coroutines.launch
 
 /**
@@ -195,6 +196,16 @@ private fun SyncCard(ic: ICloudManager) {
                 else LinearProgressIndicator(Modifier.fillMaxWidth())
             }
             if (status.isNotEmpty()) Text(status, style = MaterialTheme.typography.bodySmall)
+            if (!running && Storage.NOT_RESPONDING in status) {
+                // l'app del cloud non è partita: aprirla la rimette in funzione, poi si riprova
+                val launch = load(destId, initial = null as Intent?) {
+                    repo.lib.source(destId)?.let { Storage.providerLaunch(ctx, android.net.Uri.parse(it.path).authority ?: "") }
+                }
+                if (launch != null) OutlinedButton(onClick = {
+                    ctx.startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    ic.schedule(replace = true)
+                }) { Text("Apri l'app del cloud e riprova") }
+            }
             if (enabled && !running) workState?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             Text("Foto di iCloud già copiate: ${Fmt.thousands(synced.toLong())}", style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)

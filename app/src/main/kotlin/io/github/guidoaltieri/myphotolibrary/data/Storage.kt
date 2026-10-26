@@ -2,6 +2,7 @@ package io.github.guidoaltieri.myphotolibrary.data
 
 import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
 import android.database.ContentObserver
 import android.database.Cursor
 import android.net.Uri
@@ -41,7 +42,7 @@ object Storage {
      * - se l'app risponde «sto ancora caricando» (EXTRA_LOADING) si aspetta che finisca e si
      *   rilegge, invece di prendere un elenco vuoto o parziale.
      */
-    private fun queryChildren(ctx: Context, uri: Uri, cancelled: () -> Boolean): ChildQuery {
+    private fun queryChildren(ctx: Context, uri: Uri, cancelled: () -> Boolean, trace: (String) -> Unit = {}): ChildQuery {
         var lastError: String? = null
         for (wait in RETRY_MS) {
             if (cancelled()) break
@@ -50,17 +51,24 @@ object Storage {
                 ctx.contentResolver.query(uri, PROJECTION, null, null, null)
             } catch (e: SecurityException) {
                 // solo un rifiuto vero di Android: il permesso salvato non c'è più
+                trace("rifiuto di Android: ${e.message}")
                 return ChildQuery(null, "Android non concede più l'accesso alla cartella: ricollegala da Sorgenti")
             } catch (e: Exception) {
-                lastError = e.message ?: e.javaClass.simpleName
+                lastError = e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
+                trace("errore: ${e.javaClass.simpleName}: ${e.message}")
                 null
             }
+            // null: l'app non ha risposto (processo chiuso o andato in errore mentre rispondeva)
+            trace(if (c == null) "nessuna risposta" else "${c.count} elementi, in caricamento ${c.extras.getBoolean(DocumentsContract.EXTRA_LOADING)}, " +
+                "errore ${c.extras.getString(DocumentsContract.EXTRA_ERROR)}")
             var rounds = 0
             while (c != null && c.extras.getBoolean(DocumentsContract.EXTRA_LOADING) && rounds < LOADING_ROUNDS && !cancelled()) {
-                waitForChange(c)
+                val changed = waitForChange(c)
                 c.close()
-                c = try { ctx.contentResolver.query(uri, PROJECTION, null, null, null) } catch (e: Exception) { null }
+                c = try { ctx.contentResolver.query(uri, PROJECTION, null, null, null) } catch (e: Exception) { trace("errore: $e"); null }
                 rounds++
+                trace("  dopo ${if (changed) "l'avviso dell'app" else "20 s senza avvisi"}: " + (c?.let { "${it.count} elementi, in caricamento " +
+                    "${it.extras.getBoolean(DocumentsContract.EXTRA_LOADING)}" } ?: "nessuna risposta"))
             }
             if (c != null) {
                 c.extras.getString(DocumentsContract.EXTRA_ERROR)?.let { if (c.count == 0) lastError = it }
@@ -68,21 +76,33 @@ object Storage {
                 c.close()
             }
         }
-        return ChildQuery(null, lastError ?: "l'app della cartella non risponde")
+        return ChildQuery(null, lastError ?: NOT_RESPONDING)
     }
 
     /** Aspetta che l'app avvisi di aver finito di caricare (al massimo [LOADING_WAIT_MS]). */
-    private fun waitForChange(c: Cursor) {
+    private fun waitForChange(c: Cursor): Boolean {
         val latch = CountDownLatch(1)
         val obs = object : ContentObserver(null) {
             override fun onChange(selfChange: Boolean) = latch.countDown()
         }
         c.registerContentObserver(obs)
         try {
-            latch.await(LOADING_WAIT_MS, TimeUnit.MILLISECONDS)
+            return latch.await(LOADING_WAIT_MS, TimeUnit.MILLISECONDS)
         } finally {
             c.unregisterContentObserver(obs)
         }
+    }
+
+    /** L'app del cloud non si avvia: spesso il telefono le impedisce di partire su richiesta di altre app. */
+    const val NOT_RESPONDING = "l'app del cloud non risponde. Aprila e lasciala in background, oppure consentile " +
+        "l'avvio automatico e la batteria «senza restrizioni» nelle impostazioni del telefono"
+
+    /** App che fornisce le cartelle di [authority], per aprirla e farla ripartire. */
+    fun providerLaunch(ctx: Context, authority: String): Intent? {
+        val pm = ctx.packageManager
+        val pkg = try { pm.resolveContentProvider(authority, 0)?.packageName } catch (e: Exception) { null }
+        val candidates = listOfNotNull(pkg) + authority.split('.').let { parts -> (parts.size downTo 2).map { parts.take(it).joinToString(".") } }
+        return candidates.firstNotNullOfOrNull { pm.getLaunchIntentForPackage(it) }
     }
 
     /** attese prima di ogni tentativo (circa 30 secondi in tutto) */
@@ -200,7 +220,7 @@ object Storage {
         private fun readChildren(rel: String): List<Triple<String, String, Long>> {
             val id = ids[rel] ?: return emptyList()
             val out = mutableListOf<Triple<String, String, Long>>()
-            val q = queryChildren(ctx, DocumentsContract.buildChildDocumentsUriUsingTree(tree, id), cancelled)
+            val q = queryChildren(ctx, DocumentsContract.buildChildDocumentsUriUsingTree(tree, id), cancelled) { log("Elenco di «${rel.ifEmpty { "/" }}» ($id): $it") }
             (q.cursor ?: throw ICloudSync.DestinationError("Cartella «${rel.ifEmpty { "/" }}» non leggibile: ${q.error}")).use { c ->
                 while (c.moveToNext()) {
                     val name = c.getString(1) ?: continue
