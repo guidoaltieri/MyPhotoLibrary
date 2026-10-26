@@ -45,7 +45,10 @@ class Scanner(private val ctx: Context, private val lib: Library, private val re
                     // cartelle collegate prima: il nome era l'identificativo interno (es. un codice): si usa quello vero
                     if (src.name == io.github.guidoaltieri.myphotolibrary.ui.treeIdName(tree) || io.github.guidoaltieri.myphotolibrary.ui.isCodeName(src.name))
                         io.github.guidoaltieri.myphotolibrary.ui.treeName(ctx, tree).takeIf { it != src.name }?.let { lib.renameSource(src.id, it) }
-                    val listing = Storage.walkTree(ctx, tree) { !isActive }
+                    val log = (ctx.applicationContext as io.github.guidoaltieri.myphotolibrary.App).repo.icloud::log
+                    log("Lettura di ${src.name} (${tree.authority})")
+                    val listing = Storage.walkTree(ctx, tree, { !isActive }) { log("  $it") }
+                    log("  ${listing.files.size} foto e video, ${listing.failedDirs} cartelle senza risposta${listing.error?.let { ", errore: $it" } ?: ""}")
                     if (!listing.reachable) {
                         messages += "${src.name}: cartella non raggiungibile (${listing.error}). La fototeca non viene modificata."
                         continue

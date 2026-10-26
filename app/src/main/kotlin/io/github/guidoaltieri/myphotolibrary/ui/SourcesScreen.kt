@@ -159,6 +159,7 @@ fun SourcesScreen() {
                 ListItem(headlineContent = { Text("iCloud Foto…") }, supportingContent = { Text("Copia le foto di iCloud in una di queste cartelle") },
                     leadingContent = { Icon(Icons.Filled.Cloud, null) }, modifier = Modifier.clickable { nav.go(Screen.ICloud) })
             }
+            item { LogButton(repo.icloud) }
             item {
                 Text("Le cartelle aggiunte sono lette senza essere copiate. Scollega nasconde le foto di una sorgente senza dimenticarla; " +
                         "Rimuovi la toglie dalla fototeca (i file non vengono toccati). Una cartella vuota o non raggiungibile non svuota mai la fototeca.",
@@ -171,6 +172,11 @@ fun SourcesScreen() {
         ConfirmDialog("Rimuovi «${s.name}»", "Le foto di questa cartella spariscono dalla fototeca (con album e modifiche). I file restano dove sono.", "Rimuovi",
             { remove = null }) {
             repo.io {
+                // era la destinazione di iCloud Foto: la copia si ferma finché non se ne sceglie un'altra
+                if (repo.icloud.destSource == s.id) {
+                    repo.icloud.stop()
+                    repo.icloud.destSource = -1
+                }
                 repo.lib.removeSource(s.id)
                 try { ctx.contentResolver.releasePersistableUriPermission(Uri.parse(s.path), Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (e: Exception) {}
             }

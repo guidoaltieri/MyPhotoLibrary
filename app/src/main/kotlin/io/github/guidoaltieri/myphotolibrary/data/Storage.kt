@@ -175,14 +175,14 @@ object Storage {
      * Foto e video di una cartella e delle sue sottocartelle (nascoste e di sistema escluse).
      * Le sottocartelle che non rispondono vengono contate: la lettura è allora incompleta.
      */
-    fun walkTree(ctx: Context, tree: Uri, cancelled: () -> Boolean = { false }): Listing {
+    fun walkTree(ctx: Context, tree: Uri, cancelled: () -> Boolean = { false }, log: (String) -> Unit = {}): Listing {
         val rootId = try { DocumentsContract.getTreeDocumentId(tree) } catch (e: Exception) { return Listing(emptyList(), 0, "indirizzo della cartella non valido") }
         val out = ArrayList<DocFile>()
         val queue = ArrayDeque(listOf(rootId to ""))
         var failed = 0
         while (queue.isNotEmpty() && !cancelled()) {
             val (docId, rel) = queue.removeFirst()
-            val q = queryChildren(ctx, DocumentsContract.buildChildDocumentsUriUsingTree(tree, docId), cancelled)
+            val q = queryChildren(ctx, DocumentsContract.buildChildDocumentsUriUsingTree(tree, docId), cancelled) { log("«${rel.ifEmpty { "/" }}»: $it") }
             val c = q.cursor
             if (c == null) {
                 if (rel.isEmpty()) return Listing(emptyList(), 0, q.error)

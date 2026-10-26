@@ -85,9 +85,9 @@ fun ICloudScreen() {
     }
 }
 
-/** Il registro di accesso e copia, da inviare se qualcosa non va. */
+/** Il registro (accesso a iCloud, copia, lettura delle cartelle cloud), da inviare se qualcosa non va. */
 @Composable
-private fun LogButton(ic: ICloudManager) {
+fun LogButton(ic: ICloudManager) {
     val repo = repo()
     val ctx = LocalContext.current
     TextButton(onClick = {
