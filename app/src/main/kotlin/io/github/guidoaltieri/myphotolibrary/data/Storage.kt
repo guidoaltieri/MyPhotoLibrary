@@ -24,7 +24,9 @@ object Storage {
 
     private val SKIP_DIRS = setOf("\$RECYCLE.BIN", "System Volume Information", "lost+found")
     private val PROJECTION = arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME,
-        DocumentsContract.Document.COLUMN_MIME_TYPE, DocumentsContract.Document.COLUMN_SIZE, DocumentsContract.Document.COLUMN_LAST_MODIFIED)
+        DocumentsContract.Document.COLUMN_MIME_TYPE, DocumentsContract.Document.COLUMN_SIZE, DocumentsContract.Document.COLUMN_LAST_MODIFIED,
+        // non serve, ma kDrive va in errore se manca quando rilegge una cartella
+        DocumentsContract.Document.COLUMN_FLAGS)
 
     /** Esito della lettura di una cartella: [error] se la cartella principale non risponde. */
     class Listing(val files: List<DocFile>, val failedDirs: Int, val error: String?) {
@@ -64,8 +66,10 @@ object Storage {
             var rounds = 0
             while (c != null && c.extras.getBoolean(DocumentsContract.EXTRA_LOADING) && rounds < LOADING_ROUNDS && !cancelled()) {
                 val changed = waitForLoad(ctx, c, uri)
+                // si rilegge prima di chiudere: alcune app (kDrive) ricopiano il nuovo elenco dal cursore precedente
+                val next = try { ctx.contentResolver.query(uri, PROJECTION, null, null, null) } catch (e: Exception) { trace("errore: $e"); null }
                 c.close()
-                c = try { ctx.contentResolver.query(uri, PROJECTION, null, null, null) } catch (e: Exception) { trace("errore: $e"); null }
+                c = next
                 rounds++
                 trace("  dopo ${if (changed) "gli avvisi dell'app" else "20 s senza avvisi"}: " + (c?.let { "${it.count} elementi, in caricamento " +
                     "${it.extras.getBoolean(DocumentsContract.EXTRA_LOADING)}" } ?: "nessuna risposta"))
