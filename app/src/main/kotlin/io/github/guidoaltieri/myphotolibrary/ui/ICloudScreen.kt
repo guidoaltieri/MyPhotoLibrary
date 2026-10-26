@@ -261,8 +261,12 @@ private fun DestinationCard(ic: ICloudManager) {
             Text("Destinazione", style = MaterialTheme.typography.titleMedium)
             Text("Una cartella di un cloud già collegato all'app (Sorgenti): le foto vengono scritte direttamente lì tramite l'app " +
                     "del servizio, senza copie sul telefono, e compaiono nella libreria man mano.", style = MaterialTheme.typography.bodySmall)
+            val apps = load(folders, initial = emptyMap<Long, String>()) {
+                folders.mapNotNull { s -> providerName(ctx, s.provider.ifEmpty { android.net.Uri.parse(s.path).authority ?: "" })?.let { s.id to it } }.toMap()
+            }
             folders.forEach { s ->
-                ListItem(headlineContent = { Text(s.name) },
+                // il nome dell'app del cloud, per riconoscere la cartella giusta
+                ListItem(headlineContent = { Text(s.name) }, supportingContent = apps[s.id]?.let { app -> @Composable { Text(app) } },
                     leadingContent = { RadioButton(dest == s.id, { choose(s.id) }) }, trailingContent = { Icon(Icons.Filled.Folder, null) },
                     modifier = Modifier.clickable { choose(s.id) })
             }

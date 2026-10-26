@@ -63,12 +63,20 @@ fun treeName(ctx: android.content.Context, uri: Uri): String {
     } ?: KNOWN_PROVIDERS.entries.firstOrNull { authority.startsWith(it.key) }?.value ?: name
 }
 
+/** Nome dell'app che fornisce le cartelle di [authority] («kDrive», «Internxt»…), null se non si sa. */
+fun providerName(ctx: android.content.Context, authority: String): String? = try {
+    val pm = ctx.packageManager
+    pm.resolveContentProvider(authority, 0)?.applicationInfo?.loadLabel(pm)?.toString()?.takeIf { it.isNotBlank() }
+} catch (e: Exception) {
+    null
+} ?: KNOWN_PROVIDERS.entries.firstOrNull { authority.startsWith(it.key) }?.value
+
 /** App cloud note, se Android non dice il nome dell'app che fornisce la cartella. */
 private val KNOWN_PROVIDERS = mapOf(
     "me.proton.android.drive" to "Proton Drive", "com.microsoft.skydrive" to "OneDrive", "com.nextcloud" to "Nextcloud",
     "com.owncloud" to "ownCloud", "com.google.android.apps.docs" to "Google Drive", "com.dropbox" to "Dropbox",
     "com.pcloud" to "pCloud", "mega." to "MEGA", "nz.mega" to "MEGA", "com.box" to "Box", "com.synology" to "Synology Drive",
-    "com.icedrive" to "Icedrive", "com.internxt" to "Internxt", "com.filen" to "Filen", "io.filen" to "Filen", "com.seafile" to "Seafile",
+    "com.icedrive" to "Icedrive", "com.internxt" to "Internxt", "com.infomaniak.drive" to "kDrive", "com.filen" to "Filen", "io.filen" to "Filen", "com.seafile" to "Seafile",
 )
 
 /** Un nome che è in realtà un codice (es. 01a0d02f-eb27-77fc-8ee0-f8ddbef797f9). */
