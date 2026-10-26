@@ -47,7 +47,13 @@ class Scanner(private val ctx: Context, private val lib: Library, private val re
                         io.github.guidoaltieri.myphotolibrary.ui.treeName(ctx, tree).takeIf { it != src.name }?.let { lib.renameSource(src.id, it) }
                     val log = (ctx.applicationContext as io.github.guidoaltieri.myphotolibrary.App).repo.icloud::log
                     log("Lettura di ${src.name} (${tree.authority})")
-                    val listing = Storage.walkTree(ctx, tree, { !isActive }) { log("  $it") }
+                    if (!full && Storage.isCloud(tree)) {
+                        // cartella cloud: si legge cartella per cartella senza scaricare i file, e le foto compaiono subito
+                        val r = scanCloud(src, tree, log, progress, committed) { !isActive }
+                        changed += r.first; removed += r.second; r.third?.let { messages += it }
+                        continue
+                    }
+                    val listing = Storage.walkTree(ctx, tree, { !isActive }, { log("  $it") })
                     log("  ${listing.files.size} foto e video, ${listing.failedDirs} cartelle senza risposta${listing.error?.let { ", errore: $it" } ?: ""}")
                     if (!listing.reachable) {
                         messages += "${src.name}: cartella non raggiungibile (${listing.error}). La fototeca non viene modificata."
@@ -101,6 +107,42 @@ class Scanner(private val ctx: Context, private val lib: Library, private val re
             committed()
         }
         Result(changed, removed, errors, messages)
+    }
+
+    /** Cartella cloud, «veloce»: (aggiunte o aggiornate, tolte, messaggio). */
+    private fun scanCloud(src: Source, tree: Uri, log: (String) -> Unit, progress: (Progress) -> Unit, committed: () -> Unit,
+                          cancelled: () -> Boolean): Triple<Int, Int, String?> {
+        val token = "%.6f".format(java.util.Locale.ROOT, Library.now())
+        val known = lib.known(src.id)
+        var changed = 0; var seen = 0; var folders = 0
+        var lastCommit = System.currentTimeMillis()
+        val listing = Storage.walkTree(ctx, tree, cancelled, { log("  $it") }) { rel, files ->
+            folders++
+            val todo = files.filter { f ->
+                val old = known[f.uri.toString()]
+                old == null || old.second != f.size || (old.first?.toLong() ?: 0L) != f.mtime.toLong()
+            }
+            val todoSet = todo.mapTo(HashSet()) { it.uri }
+            lib.markSeen(files.filter { it.uri !in todoSet }.map { it.uri.toString() }, token)
+            if (todo.isNotEmpty()) lib.db.transaction {
+                for (f in todo) {
+                    lib.upsert(src.id, f.uri.toString(), f.name, f.relpath, reader.quick(f.name, f.relpath, f.size, f.mtime), token)
+                    changed++
+                }
+            }
+            seen += files.size
+            progress(Progress("${src.name} · ${rel.ifEmpty { "/" }} · $folders cartelle, $seen foto", seen, 0))
+            if (System.currentTimeMillis() - lastCommit > 1500) {
+                lastCommit = System.currentTimeMillis()
+                committed()
+            }
+        }
+        log("  $seen foto e video in $folders cartelle, ${listing.failedDirs} cartelle senza risposta${listing.error?.let { ", errore: $it" } ?: ""}")
+        if (!listing.reachable) return Triple(changed, 0, "${src.name}: cartella non raggiungibile (${listing.error}). La fototeca non viene modificata.")
+        val (removed, msg) = lib.finishScan(src.id, token, known.size, true, listing.complete)
+        committed()
+        val note = if (!listing.complete) "${src.name}: ${listing.failedDirs} cartelle non hanno risposto; le foto lette sono state aggiornate, nessuna è stata tolta." else msg
+        return Triple(changed, removed, note)
     }
 
     /** Tutte le foto e i video del dispositivo (tutti i volumi esterni). */

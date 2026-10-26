@@ -60,7 +60,10 @@ suspend fun computeHashes(ctx: Context, lib: Library, updated: () -> Unit): Int 
     for (chunk in lib.missingHashes().chunked(50)) {
         currentCoroutineContext().ensureActive()
         val hashes = chunk.mapNotNull { item ->
-            val b = Images.thumbnail(ctx, item, 96) ?: return@mapNotNull item.id to -1L
+            // cartelle cloud: solo la miniatura dell'app, senza scaricare le foto per cercare i doppioni
+            val uri = android.net.Uri.parse(item.path)
+            val b = Images.thumbnail(ctx, item, 96, download = uri.authority == android.provider.MediaStore.AUTHORITY || !Storage.isCloud(uri))
+                ?: return@mapNotNull item.id to -1L
             item.id to Images.dhash(b)
         }
         lib.db.transaction { hashes.forEach { (id, h) -> lib.setDhash(id, h) } }

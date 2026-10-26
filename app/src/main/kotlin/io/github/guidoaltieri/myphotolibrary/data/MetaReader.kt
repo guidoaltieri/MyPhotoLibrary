@@ -19,6 +19,20 @@ import io.github.guidoaltieri.myphotolibrary.core.extension
 class MetaReader(private val ctx: Context) {
 
     /** Metadati di un file. Non solleva eccezioni: null se il file è illeggibile. */
+    /**
+     * Dati senza aprire il file (cartelle cloud: aprirlo vorrebbe dire scaricarlo). La data viene
+     * dal nome, altrimenti dalla cartella anno/mese/giorno, altrimenti dalla data del file;
+     * dimensioni, luogo ed EXIF si leggono con «Rileggi tutto».
+     */
+    fun quick(name: String, relpath: String, size: Long, mtime: Double): MediaMeta {
+        val m = MediaMeta(kind = if (MediaInfo.isVideo(name)) "video" else "photo")
+        m.taken = MediaInfo.dateFromName(name) ?: io.github.guidoaltieri.myphotolibrary.core.Dates.suggest(relpath, mtime.takeIf { it > 0 } ?: 1.0)?.ts
+            ?: mtime.takeIf { it > 0 }
+        m.finish(name, size, mtime)
+        m.takenGuess = true
+        return m
+    }
+
     fun read(uri: Uri, name: String, relpath: String, size: Long, mtime: Double, hintTaken: Double? = null,
              locationAllowed: Boolean = true): MediaMeta? {
         val meta = try {

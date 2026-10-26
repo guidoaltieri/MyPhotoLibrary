@@ -27,7 +27,8 @@ import kotlin.math.roundToInt
 object Images {
 
     /** Miniatura veloce: cache di sistema (MediaStore o fornitore del documento), poi decodifica ridotta. */
-    fun thumbnail(ctx: Context, item: Item, size: Int): Bitmap? {
+    /** [download]: se il sistema non dà la miniatura si legge il file (per le cartelle cloud vuol dire scaricarlo). */
+    fun thumbnail(ctx: Context, item: Item, size: Int, download: Boolean = true): Bitmap? {
         val uri = Uri.parse(item.path)
         try {
             if (uri.authority == MediaStore.AUTHORITY) return ctx.contentResolver.loadThumbnail(uri, Size(size, size), null)
@@ -37,6 +38,7 @@ object Images {
         } catch (e: Exception) {
             // nessuna miniatura di sistema: si decodifica il file
         }
+        if (!download) return null
         return if (item.isVideo) videoFrame(ctx, uri, item.duration, size) else decode(ctx, uri, item.name, size)
     }
 

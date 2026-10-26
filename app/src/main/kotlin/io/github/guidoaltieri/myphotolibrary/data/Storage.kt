@@ -162,13 +162,13 @@ object Storage {
     private val RETRY_MS = longArrayOf(0, 1000, 2000, 4000, 8000, 15000)
     private const val LOADING_ROUNDS = 6
     private const val LOADING_WAIT_MS = 20_000L
-    private const val SETTLE_MS = 4_000L
+    private const val SETTLE_MS = 2_000L
     private const val SETTLE_MAX_MS = 120_000L
-    private const val PAGE_WAIT_MS = 3_000L
+    private const val PAGE_WAIT_MS = 1_000L
     private const val PAGE_SETTLE_MS = 1_000L
     private const val MAX_PAGES = 1000
     /** memoria del telefono, schede SD, download: rispondono subito con tutto l'elenco */
-    private val LOCAL_PROVIDERS = setOf("com.android.externalstorage.documents", "com.android.providers.downloads.documents",
+    val LOCAL_PROVIDERS = setOf("com.android.externalstorage.documents", "com.android.providers.downloads.documents",
         "com.android.providers.media.documents")
 
     /** Nome della cartella come lo mostra l'app che la fornisce (non l'identificativo interno). */
@@ -185,7 +185,15 @@ object Storage {
      * Foto e video di una cartella e delle sue sottocartelle (nascoste e di sistema escluse).
      * Le sottocartelle che non rispondono vengono contate: la lettura è allora incompleta.
      */
-    fun walkTree(ctx: Context, tree: Uri, cancelled: () -> Boolean = { false }, log: (String) -> Unit = {}): Listing {
+    /** Cartella di un'app cloud (non memoria, SD o download): leggere un file vuol dire scaricarlo. */
+    fun isCloud(tree: Uri): Boolean = tree.authority !in LOCAL_PROVIDERS
+
+    /**
+     * [onFolder]: i file di ogni cartella appena letta (per mostrarli subito con le cartelle cloud,
+     * dove leggere tutto l'albero può richiedere molto); in quel caso [Listing.files] resta vuoto.
+     */
+    fun walkTree(ctx: Context, tree: Uri, cancelled: () -> Boolean = { false }, log: (String) -> Unit = {},
+                 onFolder: ((rel: String, files: List<DocFile>) -> Unit)? = null): Listing {
         val rootId = try { DocumentsContract.getTreeDocumentId(tree) } catch (e: Exception) { return Listing(emptyList(), 0, "indirizzo della cartella non valido") }
         val out = ArrayList<DocFile>()
         val queue = ArrayDeque(listOf(rootId to ""))
@@ -199,6 +207,7 @@ object Storage {
                 failed++
                 continue
             }
+            val here = if (onFolder != null) ArrayList<DocFile>() else out
             c.use {
                 while (it.moveToNext()) {
                     val id = it.getString(0) ?: continue
@@ -210,10 +219,11 @@ object Storage {
                         continue
                     }
                     if (!MediaInfo.isMedia(name)) continue
-                    out += DocFile(DocumentsContract.buildDocumentUriUsingTree(tree, id), name, childRel,
+                    here += DocFile(DocumentsContract.buildDocumentUriUsingTree(tree, id), name, childRel,
                         if (it.isNull(3)) 0L else it.getLong(3), if (it.isNull(4)) 0.0 else it.getLong(4) / 1000.0)
                 }
             }
+            onFolder?.invoke(rel, here)
         }
         return Listing(out, failed + queue.size, null)   // interrotta: le cartelle in coda non sono state lette
     }
