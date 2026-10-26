@@ -14,7 +14,7 @@ import io.github.guidoaltieri.myphotolibrary.core.basename
 import io.github.guidoaltieri.myphotolibrary.core.dirname
 import java.io.IOException
 import java.io.OutputStream
-import java.util.concurrent.CountDownLatch
+import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 
 /** Accesso ai file condiviso da scansione, importazione ed esportazione. */
@@ -63,11 +63,11 @@ object Storage {
                 "errore ${c.extras.getString(DocumentsContract.EXTRA_ERROR)}")
             var rounds = 0
             while (c != null && c.extras.getBoolean(DocumentsContract.EXTRA_LOADING) && rounds < LOADING_ROUNDS && !cancelled()) {
-                val changed = waitForChange(c)
+                val changed = waitForLoad(ctx, c, uri)
                 c.close()
                 c = try { ctx.contentResolver.query(uri, PROJECTION, null, null, null) } catch (e: Exception) { trace("errore: $e"); null }
                 rounds++
-                trace("  dopo ${if (changed) "l'avviso dell'app" else "20 s senza avvisi"}: " + (c?.let { "${it.count} elementi, in caricamento " +
+                trace("  dopo ${if (changed) "gli avvisi dell'app" else "20 s senza avvisi"}: " + (c?.let { "${it.count} elementi, in caricamento " +
                     "${it.extras.getBoolean(DocumentsContract.EXTRA_LOADING)}" } ?: "nessuna risposta"))
             }
             if (c != null) {
@@ -79,17 +79,35 @@ object Storage {
         return ChildQuery(null, lastError ?: NOT_RESPONDING)
     }
 
-    /** Aspetta che l'app avvisi di aver finito di caricare (al massimo [LOADING_WAIT_MS]). */
-    private fun waitForChange(c: Cursor): Boolean {
-        val latch = CountDownLatch(1)
+    /**
+     * Aspetta che l'app finisca di caricare: il primo avviso (al massimo [LOADING_WAIT_MS]) e poi
+     * finché gli avvisi continuano. Alcune app (kDrive) avvisano a ogni pagina scaricata e, se si
+     * rilegge prima della fine, rispondono «finito» con solo una parte dei file: si rilegge quando
+     * l'app tace da [SETTLE_MS].
+     */
+    private fun waitForLoad(ctx: Context, c: Cursor, uri: Uri): Boolean {
+        val events = LinkedBlockingQueue<Unit>()
         val obs = object : ContentObserver(null) {
-            override fun onChange(selfChange: Boolean) = latch.countDown()
+            override fun onChange(selfChange: Boolean) {
+                events.offer(Unit)
+            }
         }
         c.registerContentObserver(obs)
+        // alcune app avvisano sull'indirizzo «semplice» della cartella, non su quello del cursore
+        val plain = try {
+            DocumentsContract.buildChildDocumentsUri(uri.authority, DocumentsContract.getDocumentId(uri))
+                .also { ctx.contentResolver.registerContentObserver(it, false, obs) }
+        } catch (e: Exception) {
+            null
+        }
         try {
-            return latch.await(LOADING_WAIT_MS, TimeUnit.MILLISECONDS)
+            events.poll(LOADING_WAIT_MS, TimeUnit.MILLISECONDS) ?: return false
+            val end = System.currentTimeMillis() + SETTLE_MAX_MS
+            while (System.currentTimeMillis() < end && events.poll(SETTLE_MS, TimeUnit.MILLISECONDS) != null) events.clear()
+            return true
         } finally {
             c.unregisterContentObserver(obs)
+            if (plain != null) ctx.contentResolver.unregisterContentObserver(obs)
         }
     }
 
@@ -109,6 +127,8 @@ object Storage {
     private val RETRY_MS = longArrayOf(0, 1000, 2000, 4000, 8000, 15000)
     private const val LOADING_ROUNDS = 6
     private const val LOADING_WAIT_MS = 20_000L
+    private const val SETTLE_MS = 4_000L
+    private const val SETTLE_MAX_MS = 120_000L
 
     /** Nome della cartella come lo mostra l'app che la fornisce (non l'identificativo interno). */
     fun displayName(ctx: Context, tree: Uri): String? = try {
