@@ -98,6 +98,7 @@ class MainActivity : ComponentActivity() {
         handleIntent(intent)
         // a ogni apertura: foto nuove di iCloud da copiare (se la copia automatica è attiva)
         repo.icloud.schedule()
+        lifecycleScope.launch { repo.updater.checkOnStart() }
         setContent {
             val theme by repo.settings.theme.flow.collectAsState()
             val snackbar = remember { SnackbarHostState() }
@@ -113,6 +114,7 @@ class MainActivity : ComponentActivity() {
                     BackHandler(nav.stack.size > 1) { nav.back() }
                     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
                         AppContent(hasPermission) { requestPermissions() }
+                        io.github.guidoaltieri.myphotolibrary.ui.UpdateDialog()
                         SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 80.dp))
                     }
                 }

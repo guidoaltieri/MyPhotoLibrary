@@ -44,6 +44,7 @@ class Repo(val ctx: Context) {
     val importer = Importer(ctx, reader)
     val faces = FaceAnalyzer(ctx, lib)
     val icloud by lazy { ICloudManager(ctx, this) }
+    val updater by lazy { Updater(ctx) }
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /** Cresce a ogni modifica della fototeca: le schermate si ricaricano. */

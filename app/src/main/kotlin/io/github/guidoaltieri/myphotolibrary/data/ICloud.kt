@@ -38,10 +38,9 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-/** La password dell'Apple ID, cifrata con una chiave del Keystore di Android (non lascia il telefono). */
-private class Secrets(context: Context) {
+/** Un segreto (password dell'Apple ID, token di GitHub) cifrato con una chiave del Keystore di Android (non lascia il telefono). */
+internal class Secrets(context: Context, private val alias: String = "icloud-password", private val prefKey: String = "pw") {
     private val prefs = context.getSharedPreferences("secrets", Context.MODE_PRIVATE)
-    private val alias = "icloud-password"
 
     private fun key(): SecretKey {
         val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
@@ -54,7 +53,7 @@ private class Secrets(context: Context) {
 
     var password: String?
         get() = try {
-            val data = Base64.decode(prefs.getString("pw", null) ?: return null, Base64.NO_WRAP)
+            val data = Base64.decode(prefs.getString(prefKey, null) ?: return null, Base64.NO_WRAP)
             val c = Cipher.getInstance("AES/GCM/NoPadding")
             c.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, data, 0, 12))
             String(c.doFinal(data, 12, data.size - 12), Charsets.UTF_8)
@@ -63,11 +62,11 @@ private class Secrets(context: Context) {
         }
         set(v) {
             if (v == null) {
-                prefs.edit().remove("pw").apply(); return
+                prefs.edit().remove(prefKey).apply(); return
             }
             val c = Cipher.getInstance("AES/GCM/NoPadding")
             c.init(Cipher.ENCRYPT_MODE, key())
-            prefs.edit().putString("pw", Base64.encodeToString(c.iv + c.doFinal(v.toByteArray(Charsets.UTF_8)), Base64.NO_WRAP)).apply()
+            prefs.edit().putString(prefKey, Base64.encodeToString(c.iv + c.doFinal(v.toByteArray(Charsets.UTF_8)), Base64.NO_WRAP)).apply()
         }
 }
 

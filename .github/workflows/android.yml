@@ -8,6 +8,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -25,3 +27,14 @@ jobs:
           name: MyPhotoLibrary-apk
           path: app/build/outputs/apk/**/*.apk
           if-no-files-found: error
+      # ogni versione compilata da un push diventa una release: l'app la trova e si aggiorna da sola
+      - name: Pubblica la release
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          cp app/build/outputs/apk/release/app-release.apk MyPhotoLibrary-${{ github.run_number }}.apk
+          printf '%s\n' "${MESSAGE:-Versione ${{ github.run_number }}}" | grep -v -e '^Co-Authored-By:' -e '^Claude-Session:' > notes.txt || true
+          gh release create "build-${{ github.run_number }}" "MyPhotoLibrary-${{ github.run_number }}.apk" \
+            --target "${{ github.sha }}" --title "MyPhotoLibrary 1.0.${{ github.run_number }}" --notes-file notes.txt --latest

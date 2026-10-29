@@ -268,6 +268,7 @@ fun SettingsScreen() {
                         repo.say("Cache svuotata")
                     })
             }
+            updateSettings(repo)
             item { SectionTitle("Informazioni") }
             item {
                 Text("MyPhotoLibrary ${io.github.guidoaltieri.myphotolibrary.BuildConfig.VERSION_NAME}: la fototeca di ArchPhotos per Android.\n\n" +

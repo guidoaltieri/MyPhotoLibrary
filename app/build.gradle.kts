@@ -13,8 +13,10 @@ android {
         applicationId = "io.github.guidoaltieri.myphotolibrary"
         minSdk = 29
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        // ogni compilazione su GitHub ha un numero nuovo: l'app riconosce così le versioni più recenti
+        val build = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
+        versionCode = build
+        versionName = "1.0.$build"
         ndk {
             // OpenCV (riconoscimento dei volti) include librerie native: solo telefoni a 64 bit ed emulatore
             abiFilters += listOf("arm64-v8a", "x86_64")
