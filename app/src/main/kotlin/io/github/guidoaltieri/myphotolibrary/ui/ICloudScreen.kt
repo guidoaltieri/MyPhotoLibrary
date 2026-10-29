@@ -253,6 +253,8 @@ private fun DestinationCard(ic: ICloudManager) {
             repo.io {
                 val id = repo.lib.addSource("folder", treeName(ctx, uri), uri.toString(), uri.authority ?: "")
                 kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { choose(id) }
+                // anche le foto già presenti nella cartella (copiate prima o messe lì in altro modo) entrano in libreria
+                repo.scan(listOf(id))
             }
         }
     }

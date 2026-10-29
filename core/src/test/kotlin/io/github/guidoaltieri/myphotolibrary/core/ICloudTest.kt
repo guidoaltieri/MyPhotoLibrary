@@ -184,6 +184,7 @@ class ICloudTest {
             files[relFile] = out.toByteArray()
             return ICloudSync.Written("content://dest/$relFile", out.size().toLong(), 1000.0)
         }
+        override fun existing(relFile: String) = files[relFile]?.let { ICloudSync.Written("content://dest/$relFile", it.size.toLong(), 1000.0) }
     }
 
     private class FakeRemote(val assets: List<ICloudAsset>) : ICloudSync.Remote {
@@ -226,6 +227,18 @@ class ICloudTest {
         val r4 = ICloudSync(lib, src, FakeRemote(assets), dest, "{anno}/{mese}", true).run(full = true, importId = null)
         assertEquals(0, r4.copied); assertEquals(301, r4.skipped)
         assertEquals(dest.files.size, 303)
+        // foto già nella cartella ma non in libreria (nuova fototeca, sorgente rimossa e ricollegata): entrano in libreria senza copiarle
+        val lib2 = Library(JdbcDb())
+        val src2 = lib2.source(lib2.addSource("folder", "Drive", "content://tree/Drive"))!!
+        val r5 = ICloudSync(lib2, src2, FakeRemote(assets), dest, "{anno}/{mese}", true).run(full = true, importId = null)
+        assertEquals(0, r5.copied); assertEquals(301, r5.skipped)
+        assertEquals(301, lib2.count("library").first)
+        assertEquals(1, lib2.count("favorites").first)
+        // segnate come copiate ma tolte dalla libreria: la volta dopo si rileggono e si riaggiungono
+        lib2.removeSource(src2.id)
+        val src3 = lib2.source(lib2.addSource("folder", "Drive", "content://tree/Drive"))!!
+        val r6 = ICloudSync(lib2, src3, FakeRemote(assets), dest, "{anno}/{mese}", true).run(full = false, importId = null)
+        assertEquals(0, r6.copied); assertEquals(301, lib2.count("library").first)
         @Suppress("UNUSED_VARIABLE") val unused = page().first().jsonObject
     }
 

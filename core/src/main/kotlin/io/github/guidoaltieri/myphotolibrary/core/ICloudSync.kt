@@ -28,6 +28,9 @@ class ICloudSync(
     interface Destination : ImportTarget {
         /** Crea [relFile] e lo riempie con [write]; restituisce il file creato. */
         fun put(relFile: String, write: (OutputStream) -> Unit): Written
+
+        /** Il file [relFile] già presente nella destinazione, per aggiungerlo alla fototeca senza copiarlo. */
+        fun existing(relFile: String): Written?
     }
 
     data class Written(val path: String, val size: Long, val mtime: Double)
@@ -54,6 +57,10 @@ class ICloudSync(
         var knownRun = 0
         val messages = mutableListOf<String>()
         val token = "icloud-%.0f".format(java.util.Locale.ROOT, Library.now())
+        // foto segnate come copiate ma non in libreria: si rilegge tutto per aggiungerle
+        val missing = lib.pruneIcloudSynced(source.id)
+        if (missing > 0) log("$missing foto già copiate non erano nella fototeca: si aggiungono")
+        val full = full || missing > 0
         while (!cancelled()) {
             val page = photos.page(offset)
             if (page.isEmpty()) {
@@ -97,17 +104,15 @@ class ICloudSync(
         val t = Fmt.dt(taken)
         val (rel, exists) = planner.destination(a.filename, a.size, t)
         var copied = false
-        if (!exists) {
-            val w = dest.put(rel) { out -> photos.open(a.url).use { it.copyTo(out, 1 shl 16) } }
-            addToLibrary(a, w, rel, a.filename, a.isVideo, a.width, a.height, taken, token, importId)
-            copied = true
-        }
+        // già presente (copiata prima, o da un'altra copia): non si riscarica, ma entra comunque in libreria
+        val w = if (!exists) dest.put(rel) { out -> photos.open(a.url).use { it.copyTo(out, 1 shl 16) } }.also { copied = true }
+        else dest.existing(rel)
+        if (w != null) addToLibrary(a, w, rel, a.filename, a.isVideo, a.width, a.height, taken, token, importId)
         if (a.liveUrl != null) {
             val (liveRel, liveExists) = planner.destination(a.liveFilename, a.liveSize ?: 0, t)
-            if (!liveExists) {
-                val w = dest.put(liveRel) { out -> photos.open(a.liveUrl).use { it.copyTo(out, 1 shl 16) } }
-                addToLibrary(a, w, liveRel, a.liveFilename, true, a.width, a.height, taken, token, importId, duration = 3.0)
-            }
+            val lw = if (!liveExists) dest.put(liveRel) { out -> photos.open(a.liveUrl).use { it.copyTo(out, 1 shl 16) } }
+            else dest.existing(liveRel)
+            if (lw != null) addToLibrary(a, lw, liveRel, a.liveFilename, true, a.width, a.height, taken, token, importId, duration = 3.0)
         }
         lib.markIcloudSynced(a.id, rel)
         return copied

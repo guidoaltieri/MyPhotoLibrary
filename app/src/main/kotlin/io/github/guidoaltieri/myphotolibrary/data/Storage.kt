@@ -270,7 +270,11 @@ object Storage {
                      private val log: (String) -> Unit = {}) : ICloudSync.Destination {
         private val ids = HashMap<String, String>()   // cartella relativa → id del documento
         // ogni cartella si legge una volta sola: con le app cloud un elenco può richiedere decine di secondi
-        private val listings = HashMap<String, List<Triple<String, String, Long>>>()
+        private val listings = HashMap<String, List<Child>>()
+
+        private data class Child(val id: String, val name: String, val mime: String, val size: Long, val mtime: Double) {
+            val isDir get() = mime == DocumentsContract.Document.MIME_TYPE_DIR
+        }
 
         private inline fun <T> timed(what: String, block: () -> T): T {
             val t0 = System.currentTimeMillis()
@@ -284,27 +288,44 @@ object Storage {
             ids[""] = DocumentsContract.getTreeDocumentId(tree)
         }
 
-        private fun children(rel: String): List<Triple<String, String, Long>> = listings.getOrPut(rel) {   // (nome, mime, dimensione)
+        private fun children(rel: String): List<Child> = listings.getOrPut(rel) {
             timed("Elenco di «${rel.ifEmpty { "/" }}»") { readChildren(rel) }
         }
 
-        private fun readChildren(rel: String): List<Triple<String, String, Long>> {
+        private fun readChildren(rel: String): List<Child> {
             val id = ids[rel] ?: return emptyList()
-            val out = mutableListOf<Triple<String, String, Long>>()
+            val out = mutableListOf<Child>()
             val q = queryChildren(ctx, DocumentsContract.buildChildDocumentsUriUsingTree(tree, id), cancelled) { log("Elenco di «${rel.ifEmpty { "/" }}» ($id): $it") }
             (q.cursor ?: throw ICloudSync.DestinationError("Cartella «${rel.ifEmpty { "/" }}» non leggibile: ${q.error}")).use { c ->
                 while (c.moveToNext()) {
+                    val docId = c.getString(0) ?: continue
                     val name = c.getString(1) ?: continue
-                    val mime = c.getString(2) ?: ""
-                    if (mime == DocumentsContract.Document.MIME_TYPE_DIR) ids[if (rel.isEmpty()) name else "$rel/$name"] = c.getString(0)
-                    out += Triple(name, mime, if (c.isNull(3)) 0L else c.getLong(3))
+                    val child = Child(docId, name, c.getString(2) ?: "", if (c.isNull(3)) 0L else c.getLong(3), if (c.isNull(4)) 0.0 else c.getLong(4) / 1000.0)
+                    if (child.isDir) ids[if (rel.isEmpty()) name else "$rel/$name"] = docId
+                    out += child
                 }
             }
             return out
         }
 
-        override fun listDirs(rel: String) = children(rel).filter { it.second == DocumentsContract.Document.MIME_TYPE_DIR }.map { it.first }
-        override fun listFiles(rel: String) = children(rel).filter { it.second != DocumentsContract.Document.MIME_TYPE_DIR }.associate { it.first to it.third }
+        /** Id della cartella [rel], leggendo le cartelle superiori se serve; null se non esiste. */
+        private fun resolve(rel: String): String? {
+            ids[rel]?.let { return it }
+            if (rel.isEmpty() || resolve(dirname(rel)) == null) return null
+            listDirs(dirname(rel))
+            return ids[rel]
+        }
+
+        override fun listDirs(rel: String) = children(rel).filter { it.isDir }.map { it.name }
+        override fun listFiles(rel: String) = children(rel).filter { !it.isDir }.associate { it.name to it.size }
+
+        /** Il file già presente, con l'URI nella stessa forma della scansione (così la fototeca non lo duplica). */
+        override fun existing(relFile: String): ICloudSync.Written? {
+            val dir = dirname(relFile)
+            if (resolve(dir) == null) return null
+            val f = children(dir).firstOrNull { !it.isDir && it.name == basename(relFile) } ?: return null
+            return ICloudSync.Written(DocumentsContract.buildDocumentUriUsingTree(tree, f.id).toString(), f.size, f.mtime)
+        }
 
         private fun dirId(rel: String): String {
             ids[rel]?.let { return it }

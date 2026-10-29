@@ -835,6 +835,15 @@ class Library(val db: Db) {
 
     fun clearIcloudSynced() = db.exec("DELETE FROM icloud_assets")
 
+    /**
+     * Dimentica le foto di iCloud segnate come copiate ma assenti dalla fototeca di [sourceId]
+     * (prima i file già presenti nella destinazione venivano saltati senza entrare in libreria):
+     * la sincronizzazione successiva le aggiunge. Restituisce quante.
+     */
+    fun pruneIcloudSynced(sourceId: Long): Int = db.update(
+        "DELETE FROM icloud_assets WHERE path IS NULL OR path NOT IN (SELECT relpath FROM media WHERE source_id=? AND deleted IS NULL)",
+        listOf(sourceId))
+
     // --- volti ----------------------------------------------------------------------------
     fun faceTodo(): List<Item> {
         val v = viewSql("library")
