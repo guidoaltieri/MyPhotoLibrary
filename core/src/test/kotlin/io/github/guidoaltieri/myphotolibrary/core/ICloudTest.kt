@@ -228,4 +228,30 @@ class ICloudTest {
         assertEquals(dest.files.size, 303)
         @Suppress("UNUSED_VARIABLE") val unused = page().first().jsonObject
     }
+
+    @Test
+    fun pagesStartFromNewest() {
+        // come pyicloud: startRank = totale-1-letti, DESCENDING; mai sotto 0
+        val ranks = mutableListOf<Long>()
+        val transport = HttpTransport { r ->
+            val body = when {
+                "query/batch" in r.url -> """{"batch":[{"records":[{"fields":{"itemCount":{"value":250}}}]}]}"""
+                else -> {
+                    ranks += Regex("\"startRank\".*?\"value\":(\\d+)").find(r.body ?: "")!!.groupValues[1].toLong()
+                    """{"records":[]}"""
+                }
+            }
+            HttpResponse(200, emptyMap(), ByteArrayInputStream(body.toByteArray()))
+        }
+        val store = object : ICloudStore {
+            override fun load(): String? = null
+            override fun save(json: String) {}
+        }
+        val photos = ICloudPhotos(ICloudSession("a@b.c", store, transport), "https://example.invalid/db")
+        assertEquals(250, photos.count())
+        photos.page(0); photos.page(100); photos.page(249)
+        assertEquals(listOf(249L, 149L, 0L), ranks)
+        assertTrue(photos.page(250).isEmpty())
+        assertEquals(3, ranks.size)
+    }
 }

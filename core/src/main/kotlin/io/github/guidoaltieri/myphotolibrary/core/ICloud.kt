@@ -447,22 +447,31 @@ class ICloudPhotos(private val session: ICloudSession, private val endpoint: Str
                 })
             }
         }.toString(), headers).second
-        return o["batch"]?.jsonArray?.firstOrNull()?.jsonObject?.get("records")?.jsonArray?.firstOrNull()?.jsonObject
-            ?.path("fields", "itemCount", "value")?.jsonPrimitive?.intOrNull ?: 0
+        return (o["batch"]?.jsonArray?.firstOrNull()?.jsonObject?.get("records")?.jsonArray?.firstOrNull()?.jsonObject
+            ?.path("fields", "itemCount", "value")?.jsonPrimitive?.intOrNull ?: 0).also { total = it }
     }
 
-    /** Una pagina della fototeca a partire da [offset], dalla foto più recente. */
-    fun page(offset: Int, size: Int = 100, descending: Boolean = true): List<ICloudAsset> {
+    @Volatile private var total: Int? = null
+
+    /**
+     * Una pagina della fototeca: [offset] foto già lette contando dalla più recente. Come in
+     * pyicloud, «startRank» è la posizione nella fototeca (0 = la più vecchia) e DESCENDING va
+     * all'indietro da lì: si parte da totale-1 e si scende. Partire da 0 restituiva prima le foto
+     * più vecchie, e pagine che si sovrapponevano.
+     */
+    fun page(offset: Int, size: Int = 100): List<ICloudAsset> {
+        val start = (total ?: count()) - 1 - offset
+        if (start < 0) return emptyList()
         val o = session.json("POST", url("records/query"), buildJsonObject {
             putJsonObject("query") {
                 putJsonArray("filterBy") {
                     add(buildJsonObject {
                         put("fieldName", "startRank"); put("comparator", "EQUALS")
-                        putJsonObject("fieldValue") { put("type", "INT64"); put("value", offset) }
+                        putJsonObject("fieldValue") { put("type", "INT64"); put("value", start) }
                     })
                     add(buildJsonObject {
                         put("fieldName", "direction"); put("comparator", "EQUALS")
-                        putJsonObject("fieldValue") { put("type", "STRING"); put("value", if (descending) "DESCENDING" else "ASCENDING") }
+                        putJsonObject("fieldValue") { put("type", "STRING"); put("value", "DESCENDING") }
                     })
                 }
                 put("recordType", "CPLAssetAndMasterByAssetDateWithoutHiddenOrDeleted")
