@@ -69,6 +69,12 @@ class MainActivity : ComponentActivity() {
         permissions.launch(list.toTypedArray())
     }
 
+    override fun onStart() {
+        super.onStart()
+        // a ogni apertura, anche tornando all'app dallo sfondo: foto nuove di iCloud da copiare
+        repo.icloud.schedule()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
@@ -96,8 +102,6 @@ class MainActivity : ComponentActivity() {
             }
         }
         handleIntent(intent)
-        // a ogni apertura: foto nuove di iCloud da copiare (se la copia automatica è attiva)
-        repo.icloud.schedule()
         lifecycleScope.launch { repo.updater.checkOnStart() }
         setContent {
             val theme by repo.settings.theme.flow.collectAsState()

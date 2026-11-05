@@ -105,6 +105,21 @@ class UpdatesTest {
         assertEquals(3, lib.finishScan(sid, "t3", 10, remote = true).first)
     }
 
+    @Test
+    fun scanKeepsPhotosCopiedFromICloudMeanwhile() {
+        val lib = Library(JdbcDb())
+        val sid = lib.addSource("folder", "Cloud", "content://tree/Cloud")
+        val meta = { n: String -> MediaMeta(taken = ts(2025, 11, 1)).apply { finish(n, 1, 1.0) } }
+        for (i in 0 until 10) lib.upsert(sid, "content://c/$i", "a$i.jpg", "2025/a$i.jpg", meta("a$i.jpg"), "100.000000")
+        // scansione iniziata a t=200 che vede i 10 file; nel frattempo la copia di iCloud ne aggiunge uno
+        lib.markSeen((0 until 10).map { "content://c/$it" }, "200.000000")
+        lib.upsert(sid, "content://c/new", "new.jpg", "2025/new.jpg", meta("new.jpg"), "icloud-250")
+        // e una foto di una copia precedente alla scansione, davvero sparita, si toglie
+        lib.upsert(sid, "content://c/old", "old.jpg", "2025/old.jpg", meta("old.jpg"), "icloud-150")
+        assertEquals(1, lib.finishScan(sid, "200.000000", 12, remote = true).first)
+        assertEquals(11, lib.count("library").first)
+    }
+
     private fun jpeg(w: Int, h: Int, pad: Int): ByteArray {
         // JPEG minimale: SOI, SOF0 con le dimensioni, poi byte di riempimento
         val sof = byteArrayOf(0xFF.toByte(), 0xC0.toByte(), 0, 17, 8, (h shr 8).toByte(), h.toByte(), (w shr 8).toByte(), w.toByte(), 3) + ByteArray(9)

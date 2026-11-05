@@ -229,6 +229,7 @@ class ICloudManager(private val ctx: Context, private val repo: Repo) {
     /** Esce dall'account: password, sessione e stato della copia vengono cancellati (le foto copiate restano). */
     fun signOut() {
         WorkManager.getInstance(ctx).cancelUniqueWork(WORK)
+        WorkManager.getInstance(ctx).cancelUniqueWork(PERIODIC)
         try { session?.logout() } catch (e: Exception) {}
         File(ctx.filesDir, "icloud").deleteRecursively()
         session = null
@@ -244,6 +245,7 @@ class ICloudManager(private val ctx: Context, private val repo: Repo) {
     // --- copia in background --------------------------------------------------------------------
     companion object {
         const val WORK = "icloud-sync"
+        const val PERIODIC = "icloud-periodic"
         const val CHANNEL = "sync"
         const val NOTIFICATION = 7101
     }
@@ -263,7 +265,16 @@ class ICloudManager(private val ctx: Context, private val repo: Repo) {
         enqueue(if (replace) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP)
     }
 
+    /** Ogni 6 ore, anche con l'app chiusa, si avvia il controllo delle foto nuove (se non è già in corso). */
+    private fun schedulePeriodic() {
+        val req = androidx.work.PeriodicWorkRequestBuilder<ICloudTick>(6, java.util.concurrent.TimeUnit.HOURS)
+            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+            .build()
+        WorkManager.getInstance(ctx).enqueueUniquePeriodicWork(PERIODIC, androidx.work.ExistingPeriodicWorkPolicy.KEEP, req)
+    }
+
     private fun enqueue(policy: ExistingWorkPolicy) {
+        schedulePeriodic()
         val req = OneTimeWorkRequestBuilder<ICloudWorker>()
             .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
             .build()
@@ -272,6 +283,7 @@ class ICloudManager(private val ctx: Context, private val repo: Repo) {
 
     fun stop() {
         WorkManager.getInstance(ctx).cancelUniqueWork(WORK)
+        if (!enabled) WorkManager.getInstance(ctx).cancelUniqueWork(PERIODIC)
         if (running.value) setStatus("Copia fermata: riprenderà da dove era arrivata")
     }
 
@@ -359,6 +371,15 @@ class ICloudManager(private val ctx: Context, private val repo: Repo) {
         .setOnlyAlertOnce(true)
         .setProgress(0, 0, true)
         .build()
+}
+
+/** Controllo periodico: avvia la copia (che parte solo se non è già in corso). */
+class ICloudTick(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
+    override suspend fun doWork(): Result {
+        val icloud = (applicationContext as App).repo.icloud
+        if (icloud.enabled) icloud.schedule() else WorkManager.getInstance(applicationContext).cancelUniqueWork(ICloudManager.PERIODIC)
+        return Result.success()
+    }
 }
 
 /** Copia in background, con notifica: continua anche con l'app chiusa. */

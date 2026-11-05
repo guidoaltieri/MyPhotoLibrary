@@ -753,7 +753,12 @@ class Library(val db: Db) {
      */
     fun finishScan(sourceId: Long, token: String, totalKnown: Int, remote: Boolean, complete: Boolean = true): Pair<Int, String?> = db.transaction {
         val src = source(sourceId)
-        val gone = db.query("SELECT path FROM media WHERE source_id=? AND COALESCE(scan_seen, '') != ?", listOf(sourceId, token)).map { it.str("path")!! }
+        // le foto scritte dalla copia di iCloud mentre la scansione era in corso non sono «sparite»: la
+        // scansione era già passata dalla loro cartella (prima venivano tolte dalla fototeca)
+        val started = token.toDoubleOrNull() ?: Double.MAX_VALUE
+        val gone = db.query("SELECT path FROM media WHERE source_id=? AND COALESCE(scan_seen, '') != ? AND NOT " +
+                "(COALESCE(scan_seen, '') LIKE 'icloud-%' AND CAST(substr(scan_seen, 8) AS REAL) >= ?)", listOf(sourceId, token, started))
+            .map { it.str("path")!! }
         val seenNow = db.scalarLong("SELECT COUNT(*) FROM media WHERE source_id=? AND scan_seen=?", listOf(sourceId, token))
         var msg: String? = null
         var toRemove = gone
