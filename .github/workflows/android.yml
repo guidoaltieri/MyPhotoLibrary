@@ -21,11 +21,16 @@ jobs:
         run: ./gradlew --no-daemon :core:test
       - name: Compila l'app
         run: ./gradlew --no-daemon :app:assembleDebug :app:assembleRelease
+      # per i push l'APK va nella release; come allegato della compilazione solo per le pull request
+      # (lo spazio per gli allegati è limitato), e tenuto pochi giorni
       - name: Pubblica gli APK
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: MyPhotoLibrary-apk
-          path: app/build/outputs/apk/**/*.apk
+          path: app/build/outputs/apk/release/*.apk
+          retention-days: 3
           if-no-files-found: error
       # ogni versione compilata da un push diventa una release: l'app la trova e si aggiorna da sola
       - name: Pubblica la release
