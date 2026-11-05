@@ -375,19 +375,23 @@ class ICloudPhotos(private val session: ICloudSession, private val endpoint: Str
         }
 
         /** Coppie asset/master di una pagina di risultati (come PhotoAlbum.photos). */
-        fun parse(records: JsonArray): List<ICloudAsset> {
-            val assets = HashMap<String, JsonObject>()
-            val masters = mutableListOf<JsonObject>()
+        /**
+         * Foto della pagina nell'ordine di iCloud, una per CPLAsset (come icloudpd: più asset possono
+         * condividere un originale, e il CPLMaster può essere arrivato nella pagina precedente, [previous]).
+         */
+        fun parse(records: JsonArray, previous: Map<String, JsonObject> = emptyMap()): List<ICloudAsset> {
+            val assets = mutableListOf<JsonObject>()
+            val masters = HashMap<String, JsonObject>()
             for (e in records) {
                 val r = e.jsonObject
                 when (r.s("recordType")) {
-                    "CPLAsset" -> r.path("fields", "masterRef", "value", "recordName")?.jsonPrimitive?.contentOrNull?.let { assets[it] = r }
-                    "CPLMaster" -> masters += r
+                    "CPLAsset" -> assets += r
+                    "CPLMaster" -> masters[r.s("recordName")] = r
                 }
             }
-            return masters.mapNotNull { m ->
-                val id = m.s("recordName")
-                val a = assets[id] ?: return@mapNotNull null
+            return assets.mapNotNull { a ->
+                val id = a.path("fields", "masterRef", "value", "recordName")?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                val m = masters[id] ?: previous[id] ?: return@mapNotNull null
                 val mf = m["fields"]?.jsonObject ?: return@mapNotNull null
                 val af = a["fields"]?.jsonObject ?: JsonObject(emptyMap())
                 fun field(prefix: String) = (af[prefix] ?: mf[prefix])?.jsonObject
@@ -452,26 +456,24 @@ class ICloudPhotos(private val session: ICloudSession, private val endpoint: Str
     }
 
     @Volatile private var total: Int? = null
+    private var previousMasters: Map<String, JsonObject> = emptyMap()
 
     /**
-     * Una pagina della fototeca: [offset] foto già lette contando dalla più recente. Come in
-     * pyicloud, «startRank» è la posizione nella fototeca (0 = la più vecchia) e DESCENDING va
-     * all'indietro da lì: si parte da totale-1 e si scende. Partire da 0 restituiva prima le foto
-     * più vecchie, e pagine che si sovrapponevano.
+     * Una pagina della fototeca, dalla più recente: come icloudpd, «startRank» = foto già lette
+     * (0 = la più recente) e direzione ASCENDING. [ICloudSync.Page.consumed] conta i CPLAsset
+     * ricevuti, da cui riparte la pagina successiva.
      */
-    fun page(offset: Int, size: Int = 100): List<ICloudAsset> {
-        val start = (total ?: count()) - 1 - offset
-        if (start < 0) return emptyList()
+    fun page(offset: Int, size: Int = 100): ICloudSync.Page {
         val o = session.json("POST", url("records/query"), buildJsonObject {
             putJsonObject("query") {
                 putJsonArray("filterBy") {
                     add(buildJsonObject {
                         put("fieldName", "startRank"); put("comparator", "EQUALS")
-                        putJsonObject("fieldValue") { put("type", "INT64"); put("value", start) }
+                        putJsonObject("fieldValue") { put("type", "INT64"); put("value", offset) }
                     })
                     add(buildJsonObject {
                         put("fieldName", "direction"); put("comparator", "EQUALS")
-                        putJsonObject("fieldValue") { put("type", "STRING"); put("value", "DESCENDING") }
+                        putJsonObject("fieldValue") { put("type", "STRING"); put("value", "ASCENDING") }
                     })
                 }
                 put("recordType", "CPLAssetAndMasterByAssetDateWithoutHiddenOrDeleted")
@@ -480,7 +482,10 @@ class ICloudPhotos(private val session: ICloudSession, private val endpoint: Str
             putJsonArray("desiredKeys") { DESIRED.forEach { add(JsonPrimitive(it)) } }
             put("zoneID", zone)
         }.toString(), headers).second
-        return parse(o["records"]?.jsonArray ?: JsonArray(emptyList()))
+        val records = o["records"]?.jsonArray ?: JsonArray(emptyList())
+        val assets = parse(records, previousMasters)
+        previousMasters = records.map { it.jsonObject }.filter { it.s("recordType") == "CPLMaster" }.associateBy { it.s("recordName") }
+        return ICloudSync.Page(assets, records.count { it.jsonObject.s("recordType") == "CPLAsset" })
     }
 
     /** Flusso dell'originale (si copia direttamente nella destinazione, senza file temporanei). */

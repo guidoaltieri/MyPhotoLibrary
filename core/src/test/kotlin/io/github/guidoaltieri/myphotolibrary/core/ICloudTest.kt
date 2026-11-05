@@ -189,7 +189,7 @@ class ICloudTest {
 
     private class FakeRemote(val assets: List<ICloudAsset>) : ICloudSync.Remote {
         var pages = 0
-        override fun page(offset: Int): List<ICloudAsset> { pages++; return assets.drop(offset).take(100) }
+        override fun page(offset: Int): ICloudSync.Page { pages++; return assets.drop(offset).take(100).let { ICloudSync.Page(it, it.size) } }
         override fun open(url: String) = ByteArrayInputStream(ByteArray(if (url.endsWith(".mov")) 300 else 1000))
     }
 
@@ -244,27 +244,30 @@ class ICloudTest {
 
     @Test
     fun pagesStartFromNewest() {
-        // come pyicloud: startRank = totale-1-letti, DESCENDING; mai sotto 0
-        val ranks = mutableListOf<Long>()
+        // come icloudpd: startRank = foto già lette (0 = la più recente), ASCENDING; si avanza di un posto per CPLAsset
+        val recs = page()
+        val assetsOnly = JsonArray(recs.filter { it.jsonObject["recordType"].toString().contains("CPLAsset") })
+        val k = assetsOnly.size
+        assertTrue(k > 0)
+        val asked = mutableListOf<String>()
         val transport = HttpTransport { r ->
-            val body = when {
-                "query/batch" in r.url -> """{"batch":[{"records":[{"fields":{"itemCount":{"value":250}}}]}]}"""
-                else -> {
-                    ranks += Regex("\"startRank\".*?\"value\":(\\d+)").find(r.body ?: "")!!.groupValues[1].toLong()
-                    """{"records":[]}"""
-                }
-            }
-            HttpResponse(200, emptyMap(), ByteArrayInputStream(body.toByteArray()))
+            val b = r.body ?: ""
+            val rank = Regex("\"startRank\".*?\"value\":(\\d+)").find(b)!!.groupValues[1].toInt()
+            asked += "$rank " + Regex("\"direction\".*?\"value\":\"(\\w+)\"").find(b)!!.groupValues[1]
+            // seconda pagina: gli stessi asset, con gli originali già arrivati nella pagina prima
+            val body = when (rank) { 0 -> recs; k -> assetsOnly; else -> JsonArray(emptyList()) }
+            HttpResponse(200, emptyMap(), ByteArrayInputStream("""{"records":$body}""".toByteArray()))
         }
         val store = object : ICloudStore {
             override fun load(): String? = null
             override fun save(json: String) {}
         }
         val photos = ICloudPhotos(ICloudSession("a@b.c", store, transport), "https://example.invalid/db")
-        assertEquals(250, photos.count())
-        photos.page(0); photos.page(100); photos.page(249)
-        assertEquals(listOf(249L, 149L, 0L), ranks)
-        assertTrue(photos.page(250).isEmpty())
-        assertEquals(3, ranks.size)
+        val p1 = photos.page(0)
+        assertEquals(k, p1.consumed); assertEquals(k, p1.assets.size)
+        val p2 = photos.page(p1.consumed)
+        assertEquals(k, p2.assets.size)
+        assertEquals(0, photos.page(2 * k).consumed)
+        assertEquals(listOf("0 ASCENDING", "$k ASCENDING", "${2 * k} ASCENDING"), asked)
     }
 }

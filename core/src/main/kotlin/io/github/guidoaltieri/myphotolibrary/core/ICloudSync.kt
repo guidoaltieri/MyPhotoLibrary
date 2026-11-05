@@ -20,7 +20,7 @@ class ICloudSync(
 ) {
     /** L'elenco e gli originali di iCloud (ICloudPhotos, o uno finto nei test). */
     interface Remote {
-        fun page(offset: Int): List<ICloudAsset>
+        fun page(offset: Int): Page
         fun open(url: String): InputStream
     }
 
@@ -34,6 +34,8 @@ class ICloudSync(
     }
 
     data class Written(val path: String, val size: Long, val mtime: Double)
+    /** Una pagina dell'elenco: le foto e quante posizioni ha occupato (la successiva parte da lì). */
+    data class Page(val assets: List<ICloudAsset>, val consumed: Int)
 
     /** La destinazione non si può leggere o scrivere: inutile provare con le foto successive. */
     class DestinationError(message: String) : java.io.IOException(message)
@@ -62,13 +64,15 @@ class ICloudSync(
         if (missing > 0) log("$missing foto già copiate non erano nella fototeca: si aggiungono")
         val full = full || missing > 0
         while (!cancelled()) {
-            val page = photos.page(offset)
-            if (page.isEmpty()) {
+            val p = photos.page(offset)
+            if (p.consumed == 0) {
                 lib.pairLivePhotos(source.id)
                 return Result(copied, skipped, errors, messages, complete = true)
             }
-            offset += page.size
-            for (a in page) {
+            if (offset == 0) log("Le più recenti su iCloud: " + p.assets.take(3).joinToString { a ->
+                "${a.filename} (${Fmt.day(a.taken)}${if (lib.icloudSynced(a.id)) ", già copiata" else ""})" })
+            offset += p.consumed
+            for (a in p.assets) {
                 if (cancelled()) break
                 checked++
                 if (lib.icloudSynced(a.id)) {
