@@ -1,0 +1,45 @@
+name: Android
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Test del motore (Kotlin puro)
+        run: ./gradlew --no-daemon :core:test
+      - name: Compila l'app
+        run: ./gradlew --no-daemon :app:assembleDebug :app:assembleRelease
+      # per i push l'APK va nella release; come allegato della compilazione solo per le pull request
+      # (lo spazio per gli allegati è limitato), e tenuto pochi giorni
+      - name: Pubblica gli APK
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: MyPhotoLibrary-apk
+          path: app/build/outputs/apk/release/*.apk
+          retention-days: 3
+          if-no-files-found: error
+      # ogni versione compilata da un push diventa una release: l'app la trova e si aggiorna da sola
+      - name: Pubblica la release
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          cp app/build/outputs/apk/release/app-release.apk MyPhotoLibrary-${{ github.run_number }}.apk
+          printf '%s\n' "${MESSAGE:-Versione ${{ github.run_number }}}" | grep -v -e '^Co-Authored-By:' -e '^Claude-Session:' > notes.txt || true
+          gh release create "build-${{ github.run_number }}" "MyPhotoLibrary-${{ github.run_number }}.apk" \
+            --target "${{ github.sha }}" --title "MyPhotoLibrary 1.0.${{ github.run_number }}" --notes-file notes.txt --latest
