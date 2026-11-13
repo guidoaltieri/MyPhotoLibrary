@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- fiore di petali colorati, come l'icona di Foto -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group android:pivotX="54" android:pivotY="54" android:rotation="0">
+        <path android:fillColor="#E6FFB300" android:pathData="M54,54 m-7,-22 a7,11 0 1,0 14,0 a7,11 0 1,0 -14,0" />
+    </group>
+    <group android:pivotX="54" android:pivotY="54" android:rotation="45">
+        <path android:fillColor="#E6FF7043" android:pathData="M54,54 m-7,-22 a7,11 0 1,0 14,0 a7,11 0 1,0 -14,0" />
+    </group>
+    <group android:pivotX="54" android:pivotY="54" android:rotation="90">
+        <path android:fillColor="#E6EC407A" android:pathData="M54,54 m-7,-22 a7,11 0 1,0 14,0 a7,11 0 1,0 -14,0" />
+    </group>
+    <group android:pivotX="54" android:pivotY="54" android:rotation="135">
+        <path android:fillColor="#E6AB47BC" android:pathData="M54,54 m-7,-22 a7,11 0 1,0 14,0 a7,11 0 1,0 -14,0" />
+    </group>
+    <group android:pivotX="54" android:pivotY="54" android:rotation="180">
+        <path android:fillColor="#E65C6BC0" android:pathData="M54,54 m-7,-22 a7,11 0 1,0 14,0 a7,11 0 1,0 -14,0" />
+    </group>
+    <group android:pivotX="54" android:pivotY="54" android:rotation="225">
+        <path android:fillColor="#E629B6F6" android:pathData="M54,54 m-7,-22 a7,11 0 1,0 14,0 a7,11 0 1,0 -14,0" />
+    </group>
+    <group android:pivotX="54" android:pivotY="54" android:rotation="270">
+        <path android:fillColor="#E626A69A" android:pathData="M54,54 m-7,-22 a7,11 0 1,0 14,0 a7,11 0 1,0 -14,0" />
+    </group>
+    <group android:pivotX="54" android:pivotY="54" android:rotation="315">
+        <path android:fillColor="#E69CCC65" android:pathData="M54,54 m-7,-22 a7,11 0 1,0 14,0 a7,11 0 1,0 -14,0" />
+    </group>
+</vector>
