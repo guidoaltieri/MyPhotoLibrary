@@ -75,7 +75,8 @@ class ICloudSync(
             for (a in p.assets) {
                 if (cancelled()) break
                 checked++
-                if (lib.icloudSynced(a.id)) {
+                // già copiata e con i dati di iCloud in libreria (altrimenti si riapplicano, senza riscaricarla)
+                if (lib.icloudSynced(a.id) && !(full && lib.icloudNeedsMeta(source.id, a.id))) {
                     knownRun++
                     if (!full && knownRun >= STOP_AFTER_KNOWN) {
                         lib.pairLivePhotos(source.id)
@@ -130,6 +131,7 @@ class ICloudSync(
         if (!video && a.liveUrl != null) m.flags += "live"
         m.finish(name, w.size, w.mtime)
         val id = lib.upsert(source.id, w.path, name, rel, m, token, importId)
+        if (a.taken != null) lib.keepIcloudMeta(id, location = m.lat != null, caption = m.caption != null)
         if (a.favorite && !video) lib.setFavorite(listOf(id), true)
     }
 }

@@ -377,6 +377,27 @@ class Library(val db: Db) {
     fun expiredDeleted(days: Int = DELETED_KEEP_DAYS): List<Long> =
         db.query("SELECT id FROM media WHERE deleted IS NOT NULL AND deleted < ? AND paired = 0", listOf(now() - days * 86400.0)).map { it.long("id")!! }
 
+    /**
+     * Dati presi da iCloud (data, luogo, didascalia): come le modifiche fatte nell'app, una nuova
+     * lettura del file non li sovrascrive (nel file possono mancare: modifiche fatte in Foto,
+     * immagini senza EXIF) e «Scrivi data e luogo nei file» può scriverli nel file.
+     */
+    fun keepIcloudMeta(id: Long, location: Boolean, caption: Boolean) {
+        val cols = mutableListOf("taken", "taken_guess")
+        if (location) cols += listOf("lat", "lon")
+        if (caption) cols += "caption"
+        userMark(listOf(id), *cols.toTypedArray())
+    }
+
+    /** Foto di iCloud già copiata ma in libreria con una data solo stimata (dati di iCloud persi): vanno riapplicati. */
+    fun icloudNeedsMeta(sourceId: Long, record: String): Boolean = db.one(
+        "SELECT 1 x FROM icloud_assets i JOIN media m ON m.relpath = i.path AND m.source_id = ? " +
+            "WHERE i.record = ? AND m.taken_guess = 1 AND instr(m.user, ',taken,') = 0", listOf(sourceId, record)) != null
+
+    /** Il file è cambiato solo per dimensione o data (es. un'app cloud che lo ricarica): i dati restano. */
+    fun touchFile(path: String, size: Long, mtime: Double, token: String) =
+        db.exec("UPDATE media SET filesize=?, mtime=?, scan_seen=? WHERE path=?", listOf(size, mtime, token, path))
+
     private fun userMark(ids: Collection<Long>, vararg cols: String) {
         val q = idList(ids)
         for (c in cols) db.exec("UPDATE media SET user = user || ? || ',' WHERE id IN $q AND instr(user, ?) = 0", listOf<Any?>(c) + listOf(",$c,"))

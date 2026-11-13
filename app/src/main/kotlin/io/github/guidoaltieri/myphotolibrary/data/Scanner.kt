@@ -126,7 +126,10 @@ class Scanner(private val ctx: Context, private val lib: Library, private val re
             lib.markSeen(files.filter { it.uri !in todoSet }.map { it.uri.toString() }, token)
             if (todo.isNotEmpty()) lib.db.transaction {
                 for (f in todo) {
-                    lib.upsert(src.id, f.uri.toString(), f.name, f.relpath, reader.quick(f.name, f.relpath, f.size, f.mtime), token)
+                    // già in libreria (es. copiata da iCloud, con data e luogo veri): cambiano solo dimensione e
+                    // data del file, che l'app cloud aggiorna dopo il caricamento; i dati letti senza file sono solo stime
+                    if (known.containsKey(f.uri.toString())) lib.touchFile(f.uri.toString(), f.size, f.mtime, token)
+                    else lib.upsert(src.id, f.uri.toString(), f.name, f.relpath, reader.quick(f.name, f.relpath, f.size, f.mtime), token)
                     changed++
                 }
             }

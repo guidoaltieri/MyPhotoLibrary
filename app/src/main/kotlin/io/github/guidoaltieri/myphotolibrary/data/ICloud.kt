@@ -125,10 +125,10 @@ class ICloudManager(private val ctx: Context, private val repo: Repo) {
             prefs.edit().putBoolean("enabled", v).apply()
         }
     /** la prima copia completa è finita: da qui in poi si cercano solo le foto nuove */
-    // «full_done_2»: le copie fatte prima della correzione delle pagine di iCloud vanno ricontrollate per intero
+    // «full_done_3»: un controllo completo dopo le correzioni (pagine di iCloud, dati di iCloud persi in libreria)
     var fullDone: Boolean
-        get() = prefs.getBoolean("full_done_2", false)
-        set(v) = prefs.edit().putBoolean("full_done_2", v).apply()
+        get() = prefs.getBoolean("full_done_3", false)
+        set(v) = prefs.edit().putBoolean("full_done_3", v).apply()
     var lastSync: Long
         get() = prefs.getLong("last_sync", 0)
         set(v) = prefs.edit().putLong("last_sync", v).apply()

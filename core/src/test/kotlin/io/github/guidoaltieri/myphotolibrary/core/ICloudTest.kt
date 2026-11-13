@@ -149,7 +149,7 @@ class ICloudTest {
         val name = Base64.getEncoder().encodeToString("IMG_0001.HEIC".toByteArray())
         val recs = listOf(
             record("CPLAsset", "A1", """"masterRef":{"value":{"recordName":"M1"}},"assetDate":{"value":1720000000000},
-                "timeZoneOffset":{"value":7200},"isFavorite":{"value":1}"""),
+                "timeZoneOffset":{"value":7200},"isFavorite":{"value":1},"locationLatitude":{"value":41.9},"locationLongitude":{"value":12.5}"""),
             record("CPLMaster", "M1", """"filenameEnc":{"value":"$name","type":"ENCRYPTED_BYTES"},"itemType":{"value":"public.heic"},
                 "resOriginalRes":{"value":{"size":1000,"downloadURL":"https://cvws.icloud-content.com/a","fileChecksum":"x"}},
                 "resOriginalWidth":{"value":4032},"resOriginalHeight":{"value":3024},
@@ -213,6 +213,19 @@ class ICloudTest {
         assertEquals(301, lib.count("library").first)
         assertEquals(1, lib.count("live").first)
         assertEquals(1, lib.count("favorites").first)
+        // i dati di iCloud restano anche se una nuova lettura del file trova altro (o niente)
+        val first = lib.db.one("SELECT path, name, relpath, taken, lat FROM media WHERE name='IMG_0001.HEIC'")!!
+        lib.upsert(sid, first.str("path")!!, "IMG_0001.HEIC", first.str("relpath")!!,
+            MediaMeta().apply { finish("IMG_0001.HEIC", 1000, 5.0) }, "rescan")
+        val after = lib.db.one("SELECT taken, lat FROM media WHERE name='IMG_0001.HEIC'")!!
+        assertTrue(first.double("lat") != null)
+        assertEquals(first.double("taken"), after.double("taken")); assertEquals(first.double("lat"), after.double("lat"))
+        // persi prima della correzione (riga senza protezione, data stimata): il controllo completo li riapplica senza ricopiare
+        lib.db.exec("UPDATE media SET user=',', taken_guess=1, taken=1.0, lat=NULL WHERE name='IMG_0001.HEIC'")
+        val fix = ICloudSync(lib, src, FakeRemote(assets), dest, "{anno}/{mese}", true).run(full = true, importId = null)
+        assertEquals(0, fix.copied)
+        assertEquals(first.double("taken"), lib.db.one("SELECT taken FROM media WHERE name='IMG_0001.HEIC'")!!.double("taken"))
+        assertEquals(first.double("lat"), lib.db.one("SELECT lat FROM media WHERE name='IMG_0001.HEIC'")!!.double("lat"))
         // sincronizzazione successiva: nessuna copia, e la lettura dell'elenco si ferma presto
         val again = FakeRemote(assets)
         val r2 = ICloudSync(lib, src, again, dest, "{anno}/{mese}", true).run(full = false, importId = null)
